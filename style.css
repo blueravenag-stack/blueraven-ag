@@ -71,7 +71,7 @@ body { display: flex; min-height: 100vh; }
 
 .brand-icon { width: 36px; height: 36px; flex-shrink: 0; }
 
-.brand-raven { width: 52px; height: 39px; flex-shrink: 0; object-fit: contain; filter: drop-shadow(0 0 4px rgba(79,195,247,0.3)); }
+.brand-raven { width: 58px; height: 58px; flex-shrink: 0; filter: drop-shadow(0 0 3px rgba(79,195,247,0.4)); }
 body.light .brand-raven { filter: none; }
 
 .brand-text { display: flex; flex-direction: column; line-height: 1.1; }

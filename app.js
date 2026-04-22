@@ -1075,15 +1075,17 @@ async function saveOrder() {
 
 // ── WRITE TO SHEET ───────────────────────────────────────────────────────────
 async function writeRow(table, data) {
-  if (GAS_URL === 'YOUR_APPS_SCRIPT_URL_HERE') return; // offline mode
+  // GAS requires no-cors mode for cross-origin POST from GitHub Pages.
+  // We send as text/plain to avoid CORS preflight; GAS reads e.postData.contents.
   try {
     await fetch(GAS_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      mode: 'no-cors',
+      headers: { 'Content-Type': 'text/plain' },
       body: JSON.stringify({ action: 'write', table, data })
     });
   } catch(e) {
-    console.warn('Write failed (offline):', e);
+    console.warn('Write failed:', e);
   }
 }
 
