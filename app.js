@@ -1075,17 +1075,17 @@ async function saveOrder() {
 
 // ── WRITE TO SHEET ───────────────────────────────────────────────────────────
 async function writeRow(table, data) {
-  // GAS requires no-cors mode for cross-origin POST from GitHub Pages.
-  // We send as text/plain to avoid CORS preflight; GAS reads e.postData.contents.
+  // Send writes as GET params to avoid all CORS/redirect issues with GAS POST.
+  // GAS doGet handles both reads (?action=read) and writes (?action=write&table=X&data=JSON)
   try {
-    await fetch(GAS_URL, {
-      method: 'POST',
-      mode: 'no-cors',
-      headers: { 'Content-Type': 'text/plain' },
-      body: JSON.stringify({ action: 'write', table, data })
-    });
+    const encoded = encodeURIComponent(JSON.stringify(data));
+    const url = `${GAS_URL}?action=write&table=${table}&data=${encoded}`;
+    const res = await fetch(url);
+    const result = await res.json();
+    if (result.error) console.warn('Write error from GAS:', result.error);
+    else console.log('Write OK:', result.action, table);
   } catch(e) {
-    console.warn('Write failed:', e);
+    console.warn('Write failed:', e.message);
   }
 }
 
