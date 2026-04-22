@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Blue Raven Ag — Spray Orders</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- SIDEBAR NAV -->
+<nav class="sidebar" id="sidebar">
+  <div class="sidebar-brand">
+    <svg class="brand-icon" viewBox="0 0 40 40" fill="none">
+      <path d="M20 4 L36 12 L36 28 L20 36 L4 28 L4 12 Z" stroke="#4FC3F7" stroke-width="1.5" fill="none"/>
+      <path d="M20 4 L20 36M4 12 L36 28M36 12 L4 28" stroke="#4FC3F7" stroke-width="0.75" opacity="0.4"/>
+      <circle cx="20" cy="20" r="4" fill="#4FC3F7"/>
+    </svg>
+    <div class="brand-text">
+      <span class="brand-name">BLUE RAVEN</span>
+      <span class="brand-sub">AG OPERATIONS</span>
+    </div>
+  </div>
+
+  <ul class="nav-links">
+    <li><a href="#" class="nav-link active" data-view="dashboard">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+      Dashboard
+    </a></li>
+    <li><a href="#" class="nav-link" data-view="orders">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 12h6M9 16h4"/></svg>
+      Orders
+    </a></li>
+    <li><a href="#" class="nav-link" data-view="customers">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
+      Customers
+    </a></li>
+    <li><a href="#" class="nav-link" data-view="products">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3h18v4H3zM3 10h18v4H3zM3 17h18v4H3z"/></svg>
+      Products & Mixes
+    </a></li>
+    <li><a href="#" class="nav-link" data-view="calculator">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="2" width="16" height="20" rx="2"/><path d="M8 6h8M8 10h8M8 14h4"/></svg>
+      Batch Calc
+    </a></li>
+    <li><a href="#" class="nav-link" data-view="reports">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+      Reports
+    </a></li>
+  </ul>
+
+  <div class="sidebar-footer">
+    <button class="btn-sync" id="syncBtn" onclick="syncData()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+      Sync Data
+    </button>
+    <div class="sync-status" id="syncStatus">Not connected</div>
+  </div>
+</nav>
+
+<!-- MOBILE HEADER -->
+<header class="mobile-header">
+  <button class="menu-toggle" onclick="toggleSidebar()">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+  </button>
+  <span class="mobile-brand">BLUE RAVEN AG</span>
+  <button class="btn-new-mobile" onclick="showNewOrderModal()">+</button>
+</header>
+
+<!-- MAIN CONTENT -->
+<main class="main" id="mainContent">
+
+  <!-- ── DASHBOARD ── -->
+  <div class="view active" id="view-dashboard">
+    <div class="view-header">
+      <div>
+        <h1 class="view-title">Dashboard</h1>
+        <p class="view-sub" id="dashDate"></p>
+      </div>
+      <button class="btn-primary" onclick="showNewOrderModal()">+ New Order</button>
+    </div>
+
+    <div class="stat-grid" id="statGrid">
+      <div class="stat-card">
+        <div class="stat-label">Open Orders</div>
+        <div class="stat-value" id="statOpen">—</div>
+      </div>
+      <div class="stat-card accent">
+        <div class="stat-label">Scheduled</div>
+        <div class="stat-value" id="statScheduled">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Completed (Month)</div>
+        <div class="stat-value" id="statCompleted">—</div>
+      </div>
+      <div class="stat-card warn">
+        <div class="stat-label">Uninvoiced</div>
+        <div class="stat-value" id="statUninvoiced">—</div>
+      </div>
+    </div>
+
+    <div class="section-header">
+      <h2 class="section-title">Upcoming Orders</h2>
+    </div>
+    <div id="dashOrders" class="order-list"></div>
+  </div>
+
+  <!-- ── ORDERS ── -->
+  <div class="view" id="view-orders">
+    <div class="view-header">
+      <div>
+        <h1 class="view-title">Orders</h1>
+      </div>
+      <button class="btn-primary" onclick="showNewOrderModal()">+ New Order</button>
+    </div>
+
+    <div class="filter-bar">
+      <input class="filter-input" type="text" id="orderSearch" placeholder="Search customer, field..." oninput="filterOrders()">
+      <select class="filter-select" id="filterStatus" onchange="filterOrders()">
+        <option value="">All Statuses</option>
+        <option value="Open">Open</option>
+        <option value="Scheduled">Scheduled</option>
+        <option value="Completed">Completed</option>
+      </select>
+      <select class="filter-select" id="filterInvoiced" onchange="filterOrders()">
+        <option value="">All</option>
+        <option value="No">Uninvoiced</option>
+        <option value="Yes">Invoiced</option>
+      </select>
+    </div>
+
+    <div id="ordersList" class="order-list"></div>
+  </div>
+
+  <!-- ── ORDER DETAIL ── -->
+  <div class="view" id="view-order-detail">
+    <div class="view-header">
+      <button class="btn-back" onclick="goBack()">← Back</button>
+      <div class="detail-actions">
+        <button class="btn-secondary" onclick="editCurrentOrder()">Edit</button>
+        <button class="btn-secondary" id="btnMarkComplete" onclick="markComplete()">Mark Complete</button>
+        <button class="btn-secondary" id="btnMarkInvoiced" onclick="markInvoiced()">Mark Invoiced</button>
+      </div>
+    </div>
+    <div id="orderDetailContent"></div>
+  </div>
+
+  <!-- ── CUSTOMERS ── -->
+  <div class="view" id="view-customers">
+    <div class="view-header">
+      <h1 class="view-title">Customers</h1>
+    </div>
+    <input class="filter-input" style="margin-bottom:1rem;width:100%;max-width:400px" type="text" id="customerSearch" placeholder="Search customers..." oninput="filterCustomers()">
+    <div id="customersList" class="customer-grid"></div>
+  </div>
+
+  <!-- ── PRODUCTS & MIXES ── -->
+  <div class="view" id="view-products">
+    <div class="view-header">
+      <h1 class="view-title">Products & Mixes</h1>
+    </div>
+    <div class="tabs">
+      <button class="tab active" onclick="switchTab('products', this)">Products</button>
+      <button class="tab" onclick="switchTab('mixes', this)">Mix Templates</button>
+    </div>
+    <div id="tab-products" class="tab-content active">
+      <div id="productsList"></div>
+    </div>
+    <div id="tab-mixes" class="tab-content">
+      <div id="mixesList"></div>
+    </div>
+  </div>
+
+  <!-- ── BATCH CALCULATOR ── -->
+  <div class="view" id="view-calculator">
+    <div class="view-header">
+      <h1 class="view-title">Batch Calculator</h1>
+    </div>
+    <div class="calc-container">
+      <div class="calc-panel">
+        <h3 class="panel-title">Select Orders to Batch</h3>
+        <p class="panel-sub">Select one or more orders with the same mix to calculate combined chemical needs.</p>
+        <div id="calcOrderList" class="calc-order-list"></div>
+        <div class="calc-tank">
+          <label class="form-label">Tank Size (gallons)</label>
+          <input class="form-input" type="number" id="tankSize" value="100" oninput="runCalc()">
+        </div>
+      </div>
+      <div class="calc-results" id="calcResults">
+        <div class="calc-empty">Select orders to see chemical requirements</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── REPORTS ── -->
+  <div class="view" id="view-reports">
+    <div class="view-header">
+      <h1 class="view-title">Reports</h1>
+    </div>
+    <div class="report-grid">
+      <div class="report-card">
+        <h3 class="report-title">Acres Treated</h3>
+        <div id="reportAcres"></div>
+      </div>
+      <div class="report-card">
+        <h3 class="report-title">Product Usage</h3>
+        <div id="reportProducts"></div>
+      </div>
+      <div class="report-card">
+        <h3 class="report-title">Revenue Summary</h3>
+        <div id="reportRevenue"></div>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<!-- ── MODALS ── -->
+<div class="modal-overlay" id="modalOverlay" onclick="closeModal()"></div>
+
+<!-- New/Edit Order Modal -->
+<div class="modal" id="orderModal">
+  <div class="modal-header">
+    <h2 class="modal-title" id="modalTitle">New Order</h2>
+    <button class="modal-close" onclick="closeModal()">×</button>
+  </div>
+  <div class="modal-body">
+    <input type="hidden" id="editOrderId">
+
+    <div class="form-section">
+      <div class="form-section-title">Job Info</div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Customer *</label>
+          <select class="form-input" id="fCustomer"></select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Field Name *</label>
+          <input class="form-input" type="text" id="fFieldName" placeholder="e.g. North 80">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Crop Type</label>
+          <select class="form-input" id="fCropType">
+            <option>Corn</option><option>Soybeans</option><option>Wheat</option>
+            <option>Sorghum</option><option>Cotton</option><option>Other</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Acres *</label>
+          <input class="form-input" type="number" id="fAcres" placeholder="0">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Scheduled Date</label>
+          <input class="form-input" type="date" id="fScheduledDate">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Pilot</label>
+          <select class="form-input" id="fPilot"></select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Status</label>
+        <select class="form-input" id="fStatus">
+          <option>Open</option><option>Scheduled</option><option>Completed</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="form-section">
+      <div class="form-section-title">Field Location</div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Latitude</label>
+          <input class="form-input" type="number" step="any" id="fLat" placeholder="41.1234">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Longitude</label>
+          <input class="form-input" type="number" step="any" id="fLng" placeholder="-98.5678">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Field Boundary (KML/polygon data)</label>
+        <textarea class="form-input" id="fPolygon" rows="2" placeholder="Paste KML or polygon coordinates here"></textarea>
+      </div>
+    </div>
+
+    <div class="form-section">
+      <div class="form-section-title">Chemical Mix</div>
+      <div class="form-row" style="align-items:flex-end;margin-bottom:0.75rem">
+        <div class="form-group" style="flex:1">
+          <label class="form-label">Apply Mix Template</label>
+          <select class="form-input" id="fTemplate">
+            <option value="">— Select template —</option>
+          </select>
+        </div>
+        <button class="btn-secondary" style="margin-bottom:0" onclick="applyTemplate()">Apply</button>
+      </div>
+      <div id="chemicalLines"></div>
+      <button class="btn-ghost" onclick="addChemicalLine()">+ Add Chemical</button>
+    </div>
+
+    <div class="form-section">
+      <div class="form-section-title">Pricing</div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Pricing Type</label>
+          <select class="form-input" id="fPricingType">
+            <option>Flat Rate</option>
+            <option>Flat Rate + Chemical</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Rate Per Acre ($)</label>
+          <input class="form-input" type="number" step="0.01" id="fRatePerAcre" placeholder="0.00">
+        </div>
+      </div>
+    </div>
+
+    <div class="form-section">
+      <div class="form-section-title">Admin</div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Chemical Supplied By</label>
+          <select class="form-input" id="fChemSupplied">
+            <option>Me</option><option>Customer</option><option>Mixed</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Invoiced</label>
+          <select class="form-input" id="fInvoiced">
+            <option value="No">No</option><option value="Yes">Yes</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Notes</label>
+        <textarea class="form-input" id="fNotes" rows="2" placeholder="Any special instructions..."></textarea>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Attachment Folder Link (Google Drive)</label>
+        <input class="form-input" type="url" id="fAttachments" placeholder="Paste Drive folder URL">
+      </div>
+    </div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn-ghost" onclick="closeModal()">Cancel</button>
+    <button class="btn-primary" onclick="saveOrder()">Save Order</button>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
