@@ -529,7 +529,18 @@ textarea.form-input { resize: vertical; }
 }
 .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
 
-.btn-back {
+.btn-danger-ghost {
+  background: transparent;
+  color: var(--danger);
+  border: 1px solid rgba(239,83,80,0.4);
+  border-radius: var(--radius);
+  padding: 0.5rem 1rem;
+  font-family: var(--font-body);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.btn-danger-ghost:hover { background: rgba(239,83,80,0.1); border-color: var(--danger); }
   background: none;
   border: none;
   color: var(--text-sub);

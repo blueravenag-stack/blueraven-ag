@@ -358,7 +358,7 @@ function filterCustomers() {
     filtered.map(c => {
       const orders = DB.orders.filter(o => o.CustomerID === c.CustomerID);
       const totalAcres = orders.reduce((s, o) => s + parseFloat(o.Acres||0), 0);
-      return `<div class="customer-card">
+      return `<div class="customer-card" onclick="editCustomer('${c.CustomerID}')">
         <div class="customer-name">${c.Name}</div>
         <div class="customer-info">
           ${c.Phone ? `📞 ${c.Phone}<br>` : ''}
@@ -366,19 +366,93 @@ function filterCustomers() {
           ${c.City ? `📍 ${c.City}, ${c.State}` : ''}
         </div>
         <div class="customer-stat">${orders.length} orders · ${totalAcres.toLocaleString()} ac total</div>
+        <div style="font-size:0.72rem;color:var(--text-sub);margin-top:0.4rem">tap to edit</div>
       </div>`;
     }).join('') :
     '<div class="empty-state">No customers found</div>';
 }
 
+// ── CUSTOMER MODAL ────────────────────────────────────────────────────────────
+function showNewCustomerModal() {
+  document.getElementById('editCustomerId').value = '';
+  document.getElementById('customerModalTitle').textContent = 'New Customer';
+  ['cName','cPhone','cEmail','cAddress','cCity','cState','cZip','cNotes'].forEach(id => {
+    document.getElementById(id).value = '';
+  });
+  document.getElementById('btnDeleteCustomer').style.display = 'none';
+  openModal('customerModal');
+}
+
+function editCustomer(customerId) {
+  const c = DB.customers.find(x => x.CustomerID === customerId);
+  if (!c) return;
+  document.getElementById('editCustomerId').value = c.CustomerID;
+  document.getElementById('customerModalTitle').textContent = 'Edit Customer';
+  document.getElementById('cName').value    = c.Name;
+  document.getElementById('cPhone').value   = c.Phone;
+  document.getElementById('cEmail').value   = c.Email;
+  document.getElementById('cAddress').value = c.Address;
+  document.getElementById('cCity').value    = c.City;
+  document.getElementById('cState').value   = c.State;
+  document.getElementById('cZip').value     = c.Zip;
+  document.getElementById('cNotes').value   = c.Notes;
+  document.getElementById('btnDeleteCustomer').style.display = '';
+  openModal('customerModal');
+}
+
+async function saveCustomer() {
+  const name = document.getElementById('cName').value.trim();
+  if (!name) { showToast('Customer name is required', 'error'); return; }
+
+  const editId = document.getElementById('editCustomerId').value;
+  const customer = {
+    CustomerID: editId || nextId('CUST', DB.customers.map(c => c.CustomerID)),
+    Name:    name,
+    Phone:   document.getElementById('cPhone').value.trim(),
+    Email:   document.getElementById('cEmail').value.trim(),
+    Address: document.getElementById('cAddress').value.trim(),
+    City:    document.getElementById('cCity').value.trim(),
+    State:   document.getElementById('cState').value.trim().toUpperCase(),
+    Zip:     document.getElementById('cZip').value.trim(),
+    Notes:   document.getElementById('cNotes').value.trim(),
+  };
+
+  if (editId) {
+    const idx = DB.customers.findIndex(c => c.CustomerID === editId);
+    if (idx > -1) DB.customers[idx] = customer;
+  } else {
+    DB.customers.push(customer);
+  }
+
+  saveToLocalStorage();
+  closeModal();
+  showToast(editId ? 'Customer updated' : 'Customer added', 'success');
+  await writeRow('customers', customer);
+  renderCustomers();
+}
+
+async function deleteCustomer() {
+  const editId = document.getElementById('editCustomerId').value;
+  if (!editId) return;
+  const inUse = DB.orders.some(o => o.CustomerID === editId);
+  if (inUse) { showToast('Cannot delete — customer has existing orders', 'error'); return; }
+  if (!confirm('Delete this customer? This cannot be undone.')) return;
+  DB.customers = DB.customers.filter(c => c.CustomerID !== editId);
+  saveToLocalStorage();
+  closeModal();
+  showToast('Customer deleted', 'success');
+  await writeRow('customers', { CustomerID: editId, _delete: true });
+  renderCustomers();
+}
+
 // ── PRODUCTS & MIXES ─────────────────────────────────────────────────────────
 function renderProducts() {
-  // Products table
+  // Products table — rows are clickable to edit
   document.getElementById('productsList').innerHTML = DB.products.length ?
     `<table class="product-table">
       <thead><tr><th>Product</th><th>Manufacturer</th><th>Unit</th><th>Cost/Unit</th><th>REI (hrs)</th><th>PHI (days)</th><th>Notes</th></tr></thead>
       <tbody>${DB.products.map(p => `
-        <tr>
+        <tr onclick="editProduct('${p.ProductID}')" style="cursor:pointer" title="Click to edit">
           <td><strong>${p.ProductName}</strong></td>
           <td>${p.Manufacturer}</td>
           <td class="mono">${p.Unit}</td>
@@ -391,15 +465,15 @@ function renderProducts() {
     </table>` :
     '<div class="empty-state">No products loaded</div>';
 
-  // Mix templates
+  // Mix templates — header is clickable to edit
   document.getElementById('mixesList').innerHTML = DB.templates.length ?
     DB.templates.map(t => {
       const prods = DB.templateProds.filter(p => p.TemplateID === t.TemplateID);
       return `<div class="mix-card">
-        <div class="mix-header">
+        <div class="mix-header" onclick="editMix('${t.TemplateID}')">
           <div>
             <div class="mix-name">${t.TemplateName}</div>
-            <div class="mix-crop">${t.CropType} · ${prods.length} chemical${prods.length !== 1 ? 's' : ''}</div>
+            <div class="mix-crop">${t.CropType} · ${prods.length} chemical${prods.length !== 1 ? 's' : ''} · tap to edit</div>
           </div>
           <span class="badge ${t.Active === 'Yes' ? 'badge-completed' : 'badge-open'}">${t.Active === 'Yes' ? 'Active' : 'Inactive'}</span>
         </div>
@@ -417,7 +491,208 @@ function renderProducts() {
     '<div class="empty-state">No mix templates loaded</div>';
 }
 
-function switchTab(tab, el) {
+// ── PRODUCT MODAL ─────────────────────────────────────────────────────────────
+function showNewProductModal() {
+  document.getElementById('editProductId').value = '';
+  document.getElementById('productModalTitle').textContent = 'New Product';
+  ['pName','pManufacturer','pCostPerUnit','pREI','pPHI','pNotes'].forEach(id => {
+    document.getElementById(id).value = '';
+  });
+  document.getElementById('pUnit').value = 'fl oz';
+  document.getElementById('btnDeleteProduct').style.display = 'none';
+  openModal('productModal');
+}
+
+function editProduct(productId) {
+  const p = DB.products.find(x => x.ProductID === productId);
+  if (!p) return;
+  document.getElementById('editProductId').value    = p.ProductID;
+  document.getElementById('productModalTitle').textContent = 'Edit Product';
+  document.getElementById('pName').value            = p.ProductName;
+  document.getElementById('pManufacturer').value    = p.Manufacturer;
+  document.getElementById('pUnit').value            = p.Unit;
+  document.getElementById('pCostPerUnit').value     = p.CostPerUnit;
+  document.getElementById('pREI').value             = p.REI_Hours;
+  document.getElementById('pPHI').value             = p.PHI_Days;
+  document.getElementById('pNotes').value           = p.Notes;
+  document.getElementById('btnDeleteProduct').style.display = '';
+  openModal('productModal');
+}
+
+async function saveProduct() {
+  const name = document.getElementById('pName').value.trim();
+  if (!name) { showToast('Product name is required', 'error'); return; }
+
+  const editId = document.getElementById('editProductId').value;
+  const product = {
+    ProductID:    editId || nextId('PROD', DB.products.map(p => p.ProductID)),
+    ProductName:  name,
+    Manufacturer: document.getElementById('pManufacturer').value.trim(),
+    Unit:         document.getElementById('pUnit').value,
+    CostPerUnit:  parseFloat(document.getElementById('pCostPerUnit').value || 0),
+    REI_Hours:    parseInt(document.getElementById('pREI').value || 0),
+    PHI_Days:     parseInt(document.getElementById('pPHI').value || 0),
+    Notes:        document.getElementById('pNotes').value.trim(),
+  };
+
+  if (editId) {
+    const idx = DB.products.findIndex(p => p.ProductID === editId);
+    if (idx > -1) DB.products[idx] = product;
+  } else {
+    DB.products.push(product);
+  }
+
+  saveToLocalStorage();
+  closeModal();
+  showToast(editId ? 'Product updated' : 'Product added', 'success');
+  await writeRow('products', product);
+  renderProducts();
+}
+
+async function deleteProduct() {
+  const editId = document.getElementById('editProductId').value;
+  if (!editId) return;
+  const inUse = DB.orderProds.some(p => p.ProductID === editId) ||
+                DB.templateProds.some(p => p.ProductID === editId);
+  if (inUse) { showToast('Cannot delete — product is used in orders or templates', 'error'); return; }
+  if (!confirm('Delete this product? This cannot be undone.')) return;
+  DB.products = DB.products.filter(p => p.ProductID !== editId);
+  saveToLocalStorage();
+  closeModal();
+  showToast('Product deleted', 'success');
+  await writeRow('products', { ProductID: editId, _delete: true });
+  renderProducts();
+}
+
+// ── MIX TEMPLATE MODAL ────────────────────────────────────────────────────────
+function showNewMixModal() {
+  document.getElementById('editMixId').value = '';
+  document.getElementById('mixModalTitle').textContent = 'New Mix Template';
+  ['mName','mDescription'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('mCropType').value = 'Corn';
+  document.getElementById('mActive').value = 'Yes';
+  document.getElementById('mixChemLines').innerHTML = '';
+  document.getElementById('btnDeleteMix').style.display = 'none';
+  openModal('mixModal');
+}
+
+function editMix(templateId) {
+  const t = DB.templates.find(x => x.TemplateID === templateId);
+  if (!t) return;
+  document.getElementById('editMixId').value          = t.TemplateID;
+  document.getElementById('mixModalTitle').textContent = 'Edit Mix Template';
+  document.getElementById('mName').value              = t.TemplateName;
+  document.getElementById('mCropType').value          = t.CropType;
+  document.getElementById('mActive').value            = t.Active;
+  document.getElementById('mDescription').value       = t.Description;
+  document.getElementById('btnDeleteMix').style.display = '';
+
+  // Load existing chemicals
+  const prods = DB.templateProds.filter(p => p.TemplateID === templateId);
+  document.getElementById('mixChemLines').innerHTML = '';
+  prods.forEach(p => addMixChemLine(p));
+
+  openModal('mixModal');
+}
+
+function addMixChemLine(prefill) {
+  const container = document.getElementById('mixChemLines');
+  const div = document.createElement('div');
+  div.className = 'chem-line';
+  const prodOptions = DB.products.map(p =>
+    `<option value="${p.ProductID}" data-unit="${p.Unit}" ${prefill?.ProductID === p.ProductID ? 'selected' : ''}>${p.ProductName}</option>`
+  ).join('');
+
+  div.innerHTML = `
+    <div class="form-group" style="margin:0">
+      <label class="form-label">Product</label>
+      <select class="form-input" onchange="this.closest('.chem-line').querySelector('.unit-field').value = this.options[this.selectedIndex].dataset.unit || 'fl oz'">
+        ${prodOptions}
+      </select>
+    </div>
+    <div class="form-group" style="margin:0">
+      <label class="form-label">Rate/Ac</label>
+      <input class="form-input" type="number" step="0.01" value="${prefill?.RatePerAcre||''}" placeholder="0">
+    </div>
+    <div class="form-group" style="margin:0">
+      <label class="form-label">Unit</label>
+      <input class="form-input unit-field" type="text" value="${prefill?.Unit||'fl oz'}" placeholder="fl oz">
+    </div>
+    <div class="form-group" style="margin:0">
+      <label class="form-label">By</label>
+      <select class="form-input">
+        <option ${prefill?.SuppliedBy==='Me'||!prefill?'selected':''}>Me</option>
+        <option ${prefill?.SuppliedBy==='Customer'?'selected':''}>Customer</option>
+      </select>
+    </div>
+    <button class="chem-line-remove" onclick="this.parentElement.remove()">×</button>
+  `;
+  container.appendChild(div);
+}
+
+async function saveMix() {
+  const name = document.getElementById('mName').value.trim();
+  if (!name) { showToast('Template name is required', 'error'); return; }
+
+  const editId = document.getElementById('editMixId').value;
+  const templateId = editId || nextId('TMPL', DB.templates.map(t => t.TemplateID));
+
+  const template = {
+    TemplateID:   templateId,
+    TemplateName: name,
+    CropType:     document.getElementById('mCropType').value,
+    Active:       document.getElementById('mActive').value,
+    Description:  document.getElementById('mDescription').value.trim(),
+  };
+
+  // Gather chemical lines
+  const lines = [...document.getElementById('mixChemLines').querySelectorAll('.chem-line')].map((line, i) => {
+    const selects = line.querySelectorAll('select');
+    const inputs  = line.querySelectorAll('input');
+    const prodId  = selects[0].value;
+    const prod    = DB.products.find(p => p.ProductID === prodId);
+    return {
+      LineID:      nextId('MTP', DB.templateProds.map(p => p.LineID)) + '_' + i,
+      TemplateID:  templateId,
+      ProductID:   prodId,
+      ProductName: prod?.ProductName || '',
+      RatePerAcre: parseFloat(inputs[0].value || 0),
+      Unit:        inputs[1].value,
+      SuppliedBy:  selects[1].value,
+      Notes:       '',
+    };
+  });
+
+  if (editId) {
+    const idx = DB.templates.findIndex(t => t.TemplateID === editId);
+    if (idx > -1) DB.templates[idx] = template;
+    // Remove old template product lines
+    DB.templateProds = DB.templateProds.filter(p => p.TemplateID !== editId);
+  } else {
+    DB.templates.push(template);
+  }
+
+  DB.templateProds.push(...lines);
+  saveToLocalStorage();
+  closeModal();
+  showToast(editId ? 'Template updated' : 'Template added', 'success');
+  await writeRow('templates', template);
+  for (const line of lines) await writeRow('templateProds', line);
+  renderProducts();
+}
+
+async function deleteMix() {
+  const editId = document.getElementById('editMixId').value;
+  if (!editId) return;
+  if (!confirm('Delete this mix template? This cannot be undone.')) return;
+  DB.templates     = DB.templates.filter(t => t.TemplateID !== editId);
+  DB.templateProds = DB.templateProds.filter(p => p.TemplateID !== editId);
+  saveToLocalStorage();
+  closeModal();
+  showToast('Template deleted', 'success');
+  await writeRow('templates', { TemplateID: editId, _delete: true });
+  renderProducts();
+}
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
   el.classList.add('active');

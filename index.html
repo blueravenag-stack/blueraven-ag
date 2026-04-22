@@ -151,6 +151,7 @@
   <div class="view" id="view-customers">
     <div class="view-header">
       <h1 class="view-title">Customers</h1>
+      <button class="btn-primary" onclick="showNewCustomerModal()">+ New Customer</button>
     </div>
     <input class="filter-input" style="margin-bottom:1rem;width:100%;max-width:400px" type="text" id="customerSearch" placeholder="Search customers..." oninput="filterCustomers()">
     <div id="customersList" class="customer-grid"></div>
@@ -166,9 +167,15 @@
       <button class="tab" onclick="switchTab('mixes', this)">Mix Templates</button>
     </div>
     <div id="tab-products" class="tab-content active">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:0.75rem">
+        <button class="btn-primary" onclick="showNewProductModal()">+ New Product</button>
+      </div>
       <div id="productsList"></div>
     </div>
     <div id="tab-mixes" class="tab-content">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:0.75rem">
+        <button class="btn-primary" onclick="showNewMixModal()">+ New Mix Template</button>
+      </div>
       <div id="mixesList"></div>
     </div>
   </div>
@@ -351,6 +358,181 @@
   <div class="modal-footer">
     <button class="btn-ghost" onclick="closeModal()">Cancel</button>
     <button class="btn-primary" onclick="saveOrder()">Save Order</button>
+  </div>
+</div>
+
+<!-- ── CUSTOMER MODAL ── -->
+<div class="modal" id="customerModal">
+  <div class="modal-header">
+    <h2 class="modal-title" id="customerModalTitle">New Customer</h2>
+    <button class="modal-close" onclick="closeModal()">×</button>
+  </div>
+  <div class="modal-body">
+    <input type="hidden" id="editCustomerId">
+    <div class="form-section">
+      <div class="form-section-title">Contact Info</div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Name / Farm Name *</label>
+          <input class="form-input" type="text" id="cName" placeholder="e.g. Smith Farms LLC">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Phone</label>
+          <input class="form-input" type="tel" id="cPhone" placeholder="555-867-5309">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Email</label>
+        <input class="form-input" type="email" id="cEmail" placeholder="farmer@example.com">
+      </div>
+    </div>
+    <div class="form-section">
+      <div class="form-section-title">Address</div>
+      <div class="form-group">
+        <label class="form-label">Street Address</label>
+        <input class="form-input" type="text" id="cAddress" placeholder="1234 County Rd 10">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">City</label>
+          <input class="form-input" type="text" id="cCity">
+        </div>
+        <div class="form-group">
+          <label class="form-label">State</label>
+          <input class="form-input" type="text" id="cState" maxlength="2" placeholder="NE">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Zip</label>
+        <input class="form-input" type="text" id="cZip" maxlength="10" style="max-width:140px">
+      </div>
+    </div>
+    <div class="form-section">
+      <div class="form-section-title">Notes</div>
+      <div class="form-group">
+        <label class="form-label">Notes</label>
+        <textarea class="form-input" id="cNotes" rows="2" placeholder="Payment terms, preferences, contact notes..."></textarea>
+      </div>
+    </div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn-danger-ghost" id="btnDeleteCustomer" onclick="deleteCustomer()" style="display:none;margin-right:auto">Delete</button>
+    <button class="btn-ghost" onclick="closeModal()">Cancel</button>
+    <button class="btn-primary" onclick="saveCustomer()">Save Customer</button>
+  </div>
+</div>
+
+<!-- ── PRODUCT MODAL ── -->
+<div class="modal" id="productModal">
+  <div class="modal-header">
+    <h2 class="modal-title" id="productModalTitle">New Product</h2>
+    <button class="modal-close" onclick="closeModal()">×</button>
+  </div>
+  <div class="modal-body">
+    <input type="hidden" id="editProductId">
+    <div class="form-section">
+      <div class="form-section-title">Product Info</div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Product Name *</label>
+          <input class="form-input" type="text" id="pName" placeholder="e.g. Roundup PowerMax 3">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Manufacturer</label>
+          <input class="form-input" type="text" id="pManufacturer" placeholder="e.g. Bayer">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Unit *</label>
+          <select class="form-input" id="pUnit">
+            <option>fl oz</option>
+            <option>oz</option>
+            <option>lb</option>
+            <option>gallon</option>
+            <option>pint</option>
+            <option>quart</option>
+            <option>ml</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Cost Per Unit ($)</label>
+          <input class="form-input" type="number" step="0.001" id="pCostPerUnit" placeholder="0.00">
+        </div>
+      </div>
+    </div>
+    <div class="form-section">
+      <div class="form-section-title">Label Requirements</div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">REI (hours)</label>
+          <input class="form-input" type="number" id="pREI" placeholder="0">
+        </div>
+        <div class="form-group">
+          <label class="form-label">PHI (days)</label>
+          <input class="form-input" type="number" id="pPHI" placeholder="0">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Notes (active ingredient, use case, etc.)</label>
+        <textarea class="form-input" id="pNotes" rows="2" placeholder="e.g. Glyphosate 54.5% — burndown herbicide"></textarea>
+      </div>
+    </div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn-danger-ghost" id="btnDeleteProduct" onclick="deleteProduct()" style="display:none;margin-right:auto">Delete</button>
+    <button class="btn-ghost" onclick="closeModal()">Cancel</button>
+    <button class="btn-primary" onclick="saveProduct()">Save Product</button>
+  </div>
+</div>
+
+<!-- ── MIX TEMPLATE MODAL ── -->
+<div class="modal" id="mixModal">
+  <div class="modal-header">
+    <h2 class="modal-title" id="mixModalTitle">New Mix Template</h2>
+    <button class="modal-close" onclick="closeModal()">×</button>
+  </div>
+  <div class="modal-body">
+    <input type="hidden" id="editMixId">
+    <div class="form-section">
+      <div class="form-section-title">Template Info</div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Template Name *</label>
+          <input class="form-input" type="text" id="mName" placeholder="e.g. Standard Corn Burndown">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Crop Type</label>
+          <select class="form-input" id="mCropType">
+            <option>Corn</option><option>Soybeans</option><option>Wheat</option>
+            <option>Sorghum</option><option>Cotton</option><option>General</option><option>Other</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Status</label>
+          <select class="form-input" id="mActive">
+            <option value="Yes">Active</option>
+            <option value="No">Inactive</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Description</label>
+        <textarea class="form-input" id="mDescription" rows="2" placeholder="When to use this mix, target pest/weed, timing notes..."></textarea>
+      </div>
+    </div>
+    <div class="form-section">
+      <div class="form-section-title">Chemical Lineup</div>
+      <div id="mixChemLines"></div>
+      <button class="btn-ghost" onclick="addMixChemLine()">+ Add Chemical</button>
+    </div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn-danger-ghost" id="btnDeleteMix" onclick="deleteMix()" style="display:none;margin-right:auto">Delete</button>
+    <button class="btn-ghost" onclick="closeModal()">Cancel</button>
+    <button class="btn-primary" onclick="saveMix()">Save Template</button>
   </div>
 </div>
 
