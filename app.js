@@ -693,6 +693,8 @@ async function deleteMix() {
   await writeRow('templates', { TemplateID: editId, _delete: true });
   renderProducts();
 }
+
+function switchTab(tab, el) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
   el.classList.add('active');

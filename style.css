@@ -541,6 +541,8 @@ textarea.form-input { resize: vertical; }
   transition: all 0.15s;
 }
 .btn-danger-ghost:hover { background: rgba(239,83,80,0.1); border-color: var(--danger); }
+
+.btn-back {
   background: none;
   border: none;
   color: var(--text-sub);
