@@ -27,8 +27,36 @@ let previousView = 'dashboard';
 let currentOrderId = null;
 let selectedCalcOrders = new Set();
 
+// ── THEME ────────────────────────────────────────────────────────────────────
+function toggleTheme() {
+  const isLight = document.body.classList.toggle('light');
+  localStorage.setItem('blueraven_theme', isLight ? 'light' : 'dark');
+  updateThemeButton(isLight);
+}
+
+function updateThemeButton(isLight) {
+  const label = document.getElementById('themeLabel');
+  const icon  = document.getElementById('themeIcon');
+  if (!label || !icon) return;
+  if (isLight) {
+    label.textContent = 'Dark Mode';
+    icon.innerHTML = '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>';
+  } else {
+    label.textContent = 'Light Mode';
+    icon.innerHTML = '<circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>';
+  }
+}
+
+function loadTheme() {
+  const saved = localStorage.getItem('blueraven_theme');
+  const isLight = saved === 'light';
+  if (isLight) document.body.classList.add('light');
+  updateThemeButton(isLight);
+}
+
 // ── INIT ────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
+  loadTheme();
   document.getElementById('dashDate').textContent =
     new Date().toLocaleDateString('en-US', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
 

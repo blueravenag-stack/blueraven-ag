@@ -17,9 +17,25 @@
   --font-mono: 'DM Mono', monospace;
   --sidebar-w: 220px;
   --radius:    6px;
+  --shadow:    none;
 }
 
-html, body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--font-body); font-size: 14px; line-height: 1.5; }
+/* ── LIGHT THEME ── */
+body.light {
+  --bg:        #f4f6f9;
+  --bg2:       #ffffff;
+  --bg3:       #eef1f5;
+  --border:    #d0d7e2;
+  --text:      #1a2332;
+  --text-sub:  #5a6a80;
+  --accent:    #1a7fc4;
+  --accent2:   #2e7d32;
+  --warn:      #e65100;
+  --danger:    #c62828;
+  --shadow:    0 1px 4px rgba(0,0,0,0.08);
+}
+
+html, body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--font-body); font-size: 14px; line-height: 1.5; transition: background 0.2s, color 0.2s; }
 
 /* ── LAYOUT ── */
 body { display: flex; min-height: 100vh; }
@@ -55,9 +71,31 @@ body { display: flex; min-height: 100vh; }
 
 .brand-icon { width: 36px; height: 36px; flex-shrink: 0; }
 
+.brand-raven { width: 52px; height: 39px; flex-shrink: 0; object-fit: contain; filter: drop-shadow(0 0 4px rgba(79,195,247,0.3)); }
+body.light .brand-raven { filter: none; }
+
 .brand-text { display: flex; flex-direction: column; line-height: 1.1; }
 .brand-name { font-family: var(--font-head); font-size: 1.1rem; letter-spacing: 0.05em; color: var(--accent); }
 .brand-sub  { font-size: 0.65rem; color: var(--text-sub); letter-spacing: 0.12em; text-transform: uppercase; }
+
+.btn-theme {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-sub);
+  font-family: var(--font-body);
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.15s;
+  margin-bottom: 0.5rem;
+}
+.btn-theme svg { width: 14px; height: 14px; flex-shrink: 0; }
+.btn-theme:hover { border-color: var(--accent); color: var(--accent); }
 
 .nav-links { list-style: none; padding: 0.75rem 0; flex: 1; }
 .nav-links li { margin: 0.1rem 0; }
@@ -152,6 +190,7 @@ body { display: flex; min-height: 100vh; }
   border-radius: var(--radius);
   padding: 1.25rem 1.5rem;
   transition: border-color 0.15s;
+  box-shadow: var(--shadow);
 }
 .stat-card:hover { border-color: var(--accent); }
 .stat-card.accent { border-left: 3px solid var(--accent); }
