@@ -23,6 +23,23 @@ let DB = {
   products: [], templates: [], templateProds: [], orderProds: [],
   fields: [], orderFields: []
 };
+
+// App settings — persisted to localStorage
+let AppSettings = {
+  defaultSprayRate: 2,   // gal/ac — used when template has no spray rate
+  defaultTankSize:  100, // gallons
+};
+
+function loadSettings() {
+  try {
+    const s = localStorage.getItem('blueraven_settings');
+    if (s) AppSettings = { ...AppSettings, ...JSON.parse(s) };
+  } catch(e) {}
+}
+
+function saveSettings() {
+  try { localStorage.setItem('blueraven_settings', JSON.stringify(AppSettings)); } catch(e) {}
+}
 let currentView = 'dashboard';
 let previousView = 'dashboard';
 let currentOrderId = null;
@@ -100,6 +117,7 @@ function renderView(view) {
     case 'fields':     renderFields(); break;
     case 'calculator': renderCalculator(); break;
     case 'reports':    renderReports(); break;
+    case 'gdu':        renderGDU(); break;
   }
 }
 
@@ -174,6 +192,7 @@ function saveToLocalStorage() {
   try { localStorage.setItem('blueraven_db', JSON.stringify(DB)); } catch(e) {}
 }
 function loadFromLocalStorage() {
+  loadSettings();
   try {
     const d = localStorage.getItem('blueraven_db');
     if (d) { DB = JSON.parse(d); renderView(currentView); }
@@ -306,6 +325,7 @@ function viewOrder(orderId) {
         <div class="detail-row"><span>Crop</span><span>${o.CropType || '—'}</span></div>
         ${o.PlantingDate ? `<div class="detail-row"><span>Planted</span><span>${fmtDate(o.PlantingDate)}</span></div>` : ''}
         ${o.RelativeMaturity ? `<div class="detail-row"><span>RM</span><span>${o.RelativeMaturity}</span></div>` : ''}
+        ${o.TemplateUsed ? `<div class="detail-row"><span>Mix Template</span><span>${DB.templates.find(t=>t.TemplateID===o.TemplateUsed)?.TemplateName || o.TemplateUsed}</span></div>` : ''}
         <div class="detail-row"><span>Scheduled</span><span>${o.ScheduledDate ? fmtDate(o.ScheduledDate) : '—'}</span></div>
         ${o.CompletedDate ? `<div class="detail-row"><span>Completed</span><span>${fmtDate(o.CompletedDate)}</span></div>` : ''}
         <div class="detail-row"><span>Pilot</span><span>${o.PilotName || '—'}</span></div>
@@ -763,6 +783,16 @@ function showNewFieldModal(presetCustomerId) {
   document.getElementById('fFieldNotes').value = '';
   document.getElementById('fFieldActive').value = 'Yes';
   document.getElementById('btnDeleteField').style.display = 'none';
+  // Ensure KML hidden input exists and is cleared
+  let kmlNew = document.getElementById('fFieldKML');
+  if (!kmlNew) {
+    kmlNew = document.createElement('input');
+    kmlNew.type = 'hidden'; kmlNew.id = 'fFieldKML';
+    document.getElementById('fieldModal').appendChild(kmlNew);
+  }
+  kmlNew.value = '';
+  const prevNew = document.getElementById('fieldPolygonPreview');
+  if (prevNew) prevNew.innerHTML = '';
 
   // Populate customer dropdown
   const sel = document.getElementById('fFieldCustomer');
@@ -799,6 +829,16 @@ function showEditFieldModal(fieldId) {
     sel.appendChild(o);
   });
 
+  // Ensure fFieldKML hidden input exists and is populated
+  let kmlHidden = document.getElementById('fFieldKML');
+  if (!kmlHidden) {
+    kmlHidden = document.createElement('input');
+    kmlHidden.type = 'hidden';
+    kmlHidden.id   = 'fFieldKML';
+    document.getElementById('fieldModal').appendChild(kmlHidden);
+  }
+  kmlHidden.value = f.PolygonKML || '';
+
   // Reload polygon preview from stored KML
   const preview = document.getElementById('fieldPolygonPreview');
   if (preview) {
@@ -809,10 +849,6 @@ function showEditFieldModal(fieldId) {
       preview.innerHTML = '';
     }
   }
-  // Clear the hidden KML input so we don't carry over from last edit
-  const kmlHidden = document.getElementById('fFieldKML');
-  if (kmlHidden) kmlHidden.value = f.PolygonKML || '';
-
   openModal('fieldModal');
 }
 
@@ -1154,12 +1190,26 @@ function runOrderCalc() {
     return;
   }
 
-  const tankSize  = parseFloat(document.getElementById('tankSize')?.value || 100);
-  const galPerAc  = parseFloat(document.getElementById('calcGalPerAc')?.value || 15);
-  const totalAcres = [...selectedCalcOrders].reduce((s, id) => {
-    return s + parseFloat(DB.orders.find(x => x.OrderID === id)?.TotalAcres || 0);
-  }, 0);
-  const totalGallons = totalAcres * galPerAc;
+  const tankSize  = parseFloat(document.getElementById('tankSize')?.value || AppSettings.defaultTankSize);
+
+  // Derive spray rate per order from its template, fall back to settings default
+  let totalAcres   = 0;
+  let totalGallons = 0;
+  const orderSprayRates = [];
+  [...selectedCalcOrders].forEach(id => {
+    const o = DB.orders.find(x => x.OrderID === id);
+    if (!o) return;
+    const ac = parseFloat(o.TotalAcres || 0);
+    const tmpl = DB.templates.find(t => t.TemplateID === o.TemplateUsed);
+    const rate = parseFloat(tmpl?.SprayRate || AppSettings.defaultSprayRate);
+    totalAcres   += ac;
+    totalGallons += ac * rate;
+    orderSprayRates.push({ id, rate, ac });
+  });
+  // Show effective rate in UI
+  const effectiveRate = totalAcres > 0 ? (totalGallons / totalAcres).toFixed(1) : AppSettings.defaultSprayRate;
+  const rateEl = document.getElementById('calcEffectiveRate');
+  if (rateEl) rateEl.textContent = effectiveRate + ' gal/ac (weighted avg from templates)';
   const loadsNeeded  = tankSize > 0 ? Math.ceil(totalGallons / tankSize) : 0;
   const acresPerLoad = loadsNeeded > 0 ? (totalAcres / loadsNeeded).toFixed(1) : 0;
 
@@ -1199,7 +1249,7 @@ function runOrderCalc() {
       <div class="calc-summary-item accent"><div class="calc-summary-val">${loadsNeeded}</div><div class="calc-summary-lbl">Tank Loads</div></div>
       <div class="calc-summary-item"><div class="calc-summary-val">${acresPerLoad}</div><div class="calc-summary-lbl">Ac/Load</div></div>
     </div>
-    <div style="font-size:0.75rem;color:var(--text-sub);margin-bottom:0.75rem">${tankSize} gal tank · ${galPerAc} gal/ac spray rate</div>
+    <div style="font-size:0.75rem;color:var(--text-sub);margin-bottom:0.75rem" id="calcEffectiveRate">${tankSize} gal tank · ${effectiveRate} gal/ac avg spray rate</div>
     ${perLoadRows}`;
 }
 
@@ -1319,6 +1369,151 @@ function runMixCalc() {
       Spray rate: ${galPerAc} gal/ac (from template)${tankSize > 0 ? ' · ' + tankSize + ' gal tank' : ''}
     </div>
     ${rows}`;
+}
+
+
+// ── GDU FUNGICIDE PREDICTOR ──────────────────────────────────────────────────
+let gduResults  = [];   // cached results per session
+let gduRunning  = false;
+
+function renderGDU() {
+  const container = document.getElementById('gduContent');
+  if (!container) return;
+
+  // Find all corn orders with planting date + RM set
+  const cornOrders = DB.orders.filter(o =>
+    o.CropType === 'Corn' && o.PlantingDate && o.RelativeMaturity &&
+    o.Status !== 'Completed'
+  );
+
+  if (!cornOrders.length) {
+    container.innerHTML = `<div class="empty-state">No active corn orders with Planting Date and RM set.<br>
+      Add these fields to your corn orders to enable GDU prediction.</div>`;
+    return;
+  }
+
+  // Show order list with run button if no results yet
+  if (!gduResults.length) {
+    container.innerHTML = `
+      <div class="gdu-intro">
+        <p>Found <strong>${cornOrders.length}</strong> active corn order${cornOrders.length !== 1 ? 's' : ''} with planting data.</p>
+        <p style="color:var(--text-sub);font-size:0.85rem;margin-top:0.25rem">
+          Fetches daily temps from Open-Meteo (free) from each field's planting date through today + 14-day forecast.
+        </p>
+        <button class="btn-primary" style="margin-top:0.75rem" onclick="runGDUAnalysis()">
+          🌽 Run GDU Analysis
+        </button>
+      </div>
+      <div class="gdu-order-preview">
+        ${cornOrders.map(o => {
+          const fields = DB.orderFields.filter(f => f.OrderID === o.OrderID);
+          return `<div class="gdu-preview-row">
+            <span>${o.OrderID} — ${o.CustomerName}</span>
+            <span style="color:var(--text-sub);font-size:0.8rem">
+              RM ${o.RelativeMaturity} · Planted ${GDUCalc.fmtDate(o.PlantingDate)} · 
+              ${fields.map(f=>f.FieldName).join(', ') || '—'}
+            </span>
+          </div>`;
+        }).join('')}
+      </div>`;
+    return;
+  }
+
+  // Show results
+  container.innerHTML = `
+    <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:1rem;flex-wrap:wrap">
+      <button class="btn-secondary" onclick="runGDUAnalysis()">🔄 Refresh Analysis</button>
+      <span style="font-size:0.8rem;color:var(--text-sub)" id="gduLastRun"></span>
+    </div>
+    ${gduResults.map(r => renderGDUCard(r)).join('')}`;
+}
+
+function renderGDUCard(r) {
+  if (r.error) {
+    return `<div class="gdu-card error">
+      <div class="gdu-card-header">${r.orderId || 'Unknown'} — ${r.customerName || ''}</div>
+      <div style="color:var(--danger);font-size:0.85rem">${r.error}</div>
+    </div>`;
+  }
+
+  const urgency  = GDUCalc.urgencyClass(r);
+  const barWidth = Math.min(100, r.pctToVT) + '%';
+  const targetPct= Math.min(100, r.windowStartGDU / r.vtGDU * 100) + '%';
+
+  const statusMsg = r.pctToVT >= 100
+    ? (r.pctToVT >= 110 ? '⚠ Past optimal window' : '✅ In application window now')
+    : r.targetProjected
+    ? `Est. target date: <strong>${GDUCalc.fmtDate(r.targetDate)}</strong>`
+    : `On track — target GDU by <strong>${GDUCalc.fmtDate(r.targetDate)}</strong>`;
+
+  return `<div class="gdu-card ${urgency}">
+    <div class="gdu-card-header">
+      <div>
+        <div class="gdu-card-title">${r.customerName} — ${r.fieldNames}</div>
+        <div class="gdu-card-sub">RM ${r.rm} · Planted ${GDUCalc.fmtDate(r.plantDate)} · ${r.stage}</div>
+      </div>
+      <div class="gdu-card-gdu">
+        <div class="gdu-val">${r.currentGDU}</div>
+        <div class="gdu-lbl">GDU</div>
+      </div>
+    </div>
+
+    <div class="gdu-progress-wrap">
+      <div class="gdu-progress-bar">
+        <div class="gdu-progress-fill" style="width:${barWidth}"></div>
+        <div class="gdu-progress-target" style="left:${targetPct}" title="Fungicide window start"></div>
+      </div>
+      <div class="gdu-progress-labels">
+        <span>0</span>
+        <span>VT (${r.vtGDU} GDU)</span>
+      </div>
+    </div>
+
+    <div class="gdu-window-row">
+      <div class="gdu-window-item">
+        <span class="gdu-window-lbl">Window opens</span>
+        <span class="gdu-window-val">${GDUCalc.fmtDate(r.windowStart)} (${r.windowStartGDU} GDU)</span>
+      </div>
+      <div class="gdu-window-item target">
+        <span class="gdu-window-lbl">🎯 Ideal application</span>
+        <span class="gdu-window-val">${GDUCalc.fmtDate(r.targetDate)} (${r.targetGDU} GDU)</span>
+      </div>
+      <div class="gdu-window-item">
+        <span class="gdu-window-lbl">Window closes</span>
+        <span class="gdu-window-val">${GDUCalc.fmtDate(r.windowEnd)}</span>
+      </div>
+    </div>
+
+    <div class="gdu-status ${urgency}">${statusMsg}${r.targetProjected ? ' <span style="color:var(--text-sub);font-size:0.78rem">(projected)</span>' : ''}</div>
+  </div>`;
+}
+
+async function runGDUAnalysis() {
+  if (gduRunning) return;
+  gduRunning = true;
+  const container = document.getElementById('gduContent');
+  if (container) container.innerHTML = '<div class="gdu-loading">🌽 Fetching weather data and calculating GDUs...<br><span style="color:var(--text-sub);font-size:0.82rem">This may take a moment for each field</span></div>';
+
+  const cornOrders = DB.orders.filter(o =>
+    o.CropType === 'Corn' && o.PlantingDate && o.RelativeMaturity && o.Status !== 'Completed'
+  );
+
+  gduResults = [];
+  for (const o of cornOrders) {
+    // Get primary field for this order (for lat/lng)
+    const orderField = DB.orderFields.find(f => f.OrderID === o.OrderID);
+    const field = orderField ? DB.fields.find(f => f.FieldID === orderField.FieldID) : null;
+    const result = await GDUCalc.analyzeOrder(o, field);
+    gduResults.push(result);
+  }
+
+  // Sort by urgency (highest pctToTarget first)
+  gduResults.sort((a, b) => (b.pctToVT || 0) - (a.pctToVT || 0));
+
+  gduRunning = false;
+  renderGDU();
+  const lastRun = document.getElementById('gduLastRun');
+  if (lastRun) lastRun.textContent = 'Updated ' + new Date().toLocaleTimeString();
 }
 
 // ── REPORTS ──────────────────────────────────────────────────────────────────

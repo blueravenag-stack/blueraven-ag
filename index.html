@@ -82,6 +82,10 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
       Reports
     </a></li>
+    <li><a href="#" class="nav-link" data-view="gdu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+      GDU Predictor
+    </a></li>
   </ul>
 
   <div class="sidebar-footer">
@@ -254,8 +258,8 @@
               <input class="form-input" type="number" id="tankSize" value="100" oninput="runOrderCalc()">
             </div>
             <div class="calc-tank" style="flex:1;min-width:100px">
-              <label class="form-label">Spray Rate (gal/ac)</label>
-              <input class="form-input" type="number" id="calcGalPerAc" value="15" oninput="runOrderCalc()">
+              <label class="form-label" title="Pulled from each order's mix template">Spray Rate</label>
+              <div id="calcEffectiveRate" style="font-size:0.8rem;color:var(--text-sub);padding-top:0.5rem">From templates</div>
             </div>
           </div>
         </div>
@@ -302,6 +306,21 @@
       <div class="report-card"><h3 class="report-title">Acres Treated</h3><div id="reportAcres"></div></div>
       <div class="report-card"><h3 class="report-title">Product Usage</h3><div id="reportProducts"></div></div>
       <div class="report-card"><h3 class="report-title">Revenue Summary</h3><div id="reportRevenue"></div></div>
+    </div>
+  </div>
+
+
+  <div class="view" id="view-gdu">
+    <div class="view-header">
+      <div>
+        <h1 class="view-title">GDU Fungicide Predictor</h1>
+        <p class="view-sub" style="font-size:0.82rem;color:var(--text-sub)">Corn only · Uses planting date + RM to predict ideal fungicide timing</p>
+      </div>
+    </div>
+    <div id="gduContent" class="gdu-container">
+      <div class="gdu-intro">
+        <p>Navigate to this tab to run analysis. Results are not calculated automatically to save data usage.</p>
+      </div>
     </div>
   </div>
 
@@ -563,6 +582,7 @@
 <script src="https://unpkg.com/jszip@3.10.1/dist/jszip.min.js"></script>
 <script src="https://unpkg.com/shapefile@0.6.6/dist/shapefile.js"></script>
 <script src="geo.js"></script>
+<script src="gdu.js"></script>
 <script src="mapModal.js"></script>
 <script src="app.js"></script>
 </body>
