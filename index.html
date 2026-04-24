@@ -644,11 +644,13 @@
 </div>
 
 
+<div class="map-overlay" id="mapOverlay" onclick="MapModal.close()"></div>
 <div class="modal modal-map" id="mapModal">
   <div class="modal-header">
     <h2 class="modal-title">Select Fields</h2>
-    <div style="display:flex;gap:0.5rem;align-items:center">
+    <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap">
       <button class="btn-secondary" id="mapDrawBtn" onclick="MapModal.toggleDraw()">✏ Draw Field</button>
+      <button class="btn-secondary" id="mapFinishBtn" onclick="MapModal.finishDrawBtn()" style="display:none">✓ Finish</button>
       <button class="btn-secondary" onclick="MapModal.showPastePanel(true)">📋 Paste KML</button>
       <button class="modal-close" onclick="MapModal.close()">×</button>
     </div>
@@ -658,7 +660,7 @@
       <div class="map-status" id="mapStatus">Loading map...</div>
       <div class="map-selected-label">Selected Fields</div>
       <div id="mapSelectedFields" class="map-selected-list">
-        <span style="color:var(--text-sub);font-size:0.8rem">No fields selected</span>
+        <span style="color:var(--text-sub);font-size:0.8rem">No fields selected — tap a green boundary</span>
       </div>
       <div id="mapPastePanel" style="display:none;margin-top:0.75rem">
         <label class="form-label">Paste KML / GeoJSON / Coordinates</label>
