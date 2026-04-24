@@ -224,7 +224,7 @@ function filterOrders() {
   const filtered = DB.orders.filter(o => {
     const matchSearch = !search ||
       o.CustomerName.toLowerCase().includes(search) ||
-      o.FieldName.toLowerCase().includes(search) ||
+      DB.orderFields.filter(f=>f.OrderID===o.OrderID).some(f=>f.FieldName.toLowerCase().includes(search)) ||
       o.OrderID.toLowerCase().includes(search);
     const matchStatus   = !status   || o.Status === status;
     const matchInvoiced = !invoiced || o.Invoiced === invoiced;
@@ -239,14 +239,15 @@ function filterOrders() {
 function orderCardHTML(o) {
   const badge = statusBadge(o.Status);
   const invoicedBadge = o.Invoiced === 'Yes' ? '<span class="badge badge-invoiced">Invoiced</span>' : '';
-  const acres = o.Acres ? `${parseFloat(o.Acres).toLocaleString()} ac` : '';
+  const acres = o.TotalAcres ? `${parseFloat(o.TotalAcres).toLocaleString()} ac` : '';
   const date  = o.ScheduledDate ? fmtDate(o.ScheduledDate) : '';
+  const fieldNames = DB.orderFields.filter(f => f.OrderID === o.OrderID).map(f => f.FieldName).join(', ') || '—';
   return `
   <div class="order-card" onclick="viewOrder('${o.OrderID}')">
     <span class="order-id">${o.OrderID}</span>
     <div class="order-main">
       <div class="order-customer">${o.CustomerName}</div>
-      <div class="order-field">${o.FieldName} · ${o.CropType}</div>
+      <div class="order-field">${fieldNames} · ${o.CropType}</div>
     </div>
     <div class="order-meta">
       <div>${acres}</div>
@@ -270,114 +271,72 @@ function viewOrder(orderId) {
   if (!o) return;
 
   const prods = DB.orderProds.filter(p => p.OrderID === orderId);
-  const estTotal = o.EstimatedTotal ? '$' + parseFloat(o.EstimatedTotal).toLocaleString('en-US', {minimumFractionDigits:2}) : '—';
-  const chemCost = o.ChemicalCost   ? '$' + parseFloat(o.ChemicalCost).toLocaleString('en-US', {minimumFractionDigits:2}) : '—';
+  const fields = DB.orderFields.filter(f => f.OrderID === orderId);
+  const fieldNames = fields.map(f => f.FieldName).join(', ') || '—';
+  const estTotal = o.EstimatedTotal ? '$' + parseFloat(o.EstimatedTotal).toLocaleString('en-US',{minimumFractionDigits:2}) : '—';
+  const chemCost = o.ChemicalCost   ? '$' + parseFloat(o.ChemicalCost).toLocaleString('en-US',{minimumFractionDigits:2}) : '—';
 
   let chemTable = '';
   if (prods.length) {
     chemTable = `<table class="chem-table">
       <thead><tr><th>Product</th><th>Rate/Ac</th><th>Unit</th><th>Supplied By</th><th>Total Qty</th><th>Cost</th></tr></thead>
-      <tbody>${prods.map(p => `
-        <tr>
-          <td>${p.ProductName}</td>
-          <td>${p.RatePerAcre}</td>
-          <td>${p.Unit}</td>
-          <td>${p.SuppliedBy}</td>
-          <td>${parseFloat(p.TotalUnitsNeeded||0).toFixed(1)} ${p.Unit}</td>
-          <td>${p.TotalProductCost ? '$'+parseFloat(p.TotalProductCost).toFixed(2) : '—'}</td>
-        </tr>`).join('')}
-      </tbody></table>`;
+      <tbody>${prods.map(p => `<tr>
+        <td>${p.ProductName}</td><td>${p.RatePerAcre}</td><td>${p.Unit}</td>
+        <td>${p.SuppliedBy}</td>
+        <td>${parseFloat(p.TotalUnitsNeeded||0).toFixed(1)} ${p.Unit}</td>
+        <td>${p.TotalProductCost ? '$'+parseFloat(p.TotalProductCost).toFixed(2) : '—'}</td>
+      </tr>`).join('')}</tbody>
+    </table>`;
   } else {
-    chemTable = '<div style="color:var(--text-sub);font-size:0.85rem;padding:0.5rem 0">No chemicals recorded</div>';
+    chemTable = '<div style="color:var(--text-sub);font-size:0.85rem">No chemicals on this order</div>';
   }
 
-  let mapHTML = '';
-  if (o.FieldLat && o.FieldLng) {
-    const mapsUrl = `https://www.google.com/maps?q=${o.FieldLat},${o.FieldLng}`;
-    const staticUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${o.FieldLat},${o.FieldLng}&zoom=13&size=600x200&maptype=satellite&markers=${o.FieldLat},${o.FieldLng}&key=NO_KEY`;
-    mapHTML = `<div class="map-container">
-      <div style="text-align:center">
-        <div style="margin-bottom:0.5rem">📍 ${o.FieldLat}, ${o.FieldLng}</div>
-        <a class="map-link" href="${mapsUrl}" target="_blank">Open in Google Maps →</a>
-      </div>
-    </div>`;
-  }
-
-  const attachLink = o.Attachments
-    ? `<a class="map-link" href="${o.Attachments}" target="_blank">📎 Open Attachments Folder →</a>`
-    : '<span style="color:var(--text-sub);font-size:0.82rem">No attachments linked</span>';
+  const btnComplete  = document.getElementById('btnMarkComplete');
+  const btnInvoiced  = document.getElementById('btnMarkInvoiced');
+  if (btnComplete) btnComplete.style.display  = o.Status !== 'Completed' ? 'inline-flex' : 'none';
+  if (btnInvoiced) btnInvoiced.style.display  = o.Invoiced !== 'Yes'     ? 'inline-flex' : 'none';
 
   document.getElementById('orderDetailContent').innerHTML = `
-    <div class="detail-header">
-      <div class="detail-order-id">${o.OrderID}</div>
-      <div class="detail-title">${o.CustomerName} — ${o.FieldName}</div>
-      <div class="detail-badges">
-        ${statusBadge(o.Status)}
-        ${o.Invoiced === 'Yes' ? '<span class="badge badge-invoiced">Invoiced</span>' : ''}
-      </div>
-    </div>
-
-    ${mapHTML}
-
     <div class="detail-grid">
       <div class="detail-card">
-        <div class="detail-card-title">Job Details</div>
-        <div class="detail-row"><span class="detail-key">Crop</span><span class="detail-val">${o.CropType}</span></div>
-        <div class="detail-row"><span class="detail-key">Acres</span><span class="detail-val">${parseFloat(o.Acres||0).toLocaleString()} ac</span></div>
-        <div class="detail-row"><span class="detail-key">Scheduled</span><span class="detail-val">${fmtDate(o.ScheduledDate)}</span></div>
-        <div class="detail-row"><span class="detail-key">Completed</span><span class="detail-val">${fmtDate(o.CompletedDate)}</span></div>
-        <div class="detail-row"><span class="detail-key">Pilot</span><span class="detail-val">${o.PilotName}</span></div>
-        <div class="detail-row"><span class="detail-key">Notes</span><span class="detail-val" style="max-width:200px;text-align:right">${o.Notes||'—'}</span></div>
+        <div class="detail-section-title">Job Info</div>
+        <div class="detail-row"><span>Order</span><strong>${o.OrderID}</strong></div>
+        <div class="detail-row"><span>Customer</span><span>${o.CustomerName}</span></div>
+        <div class="detail-row"><span>Status</span>${statusBadge(o.Status)}</div>
+        <div class="detail-row"><span>Crop</span><span>${o.CropType || '—'}</span></div>
+        ${o.PlantingDate ? `<div class="detail-row"><span>Planted</span><span>${fmtDate(o.PlantingDate)}</span></div>` : ''}
+        ${o.RelativeMaturity ? `<div class="detail-row"><span>RM</span><span>${o.RelativeMaturity}</span></div>` : ''}
+        <div class="detail-row"><span>Scheduled</span><span>${o.ScheduledDate ? fmtDate(o.ScheduledDate) : '—'}</span></div>
+        ${o.CompletedDate ? `<div class="detail-row"><span>Completed</span><span>${fmtDate(o.CompletedDate)}</span></div>` : ''}
+        <div class="detail-row"><span>Pilot</span><span>${o.PilotName || '—'}</span></div>
       </div>
       <div class="detail-card">
-        <div class="detail-card-title">Pricing</div>
-        <div class="detail-row"><span class="detail-key">Type</span><span class="detail-val">${o.PricingType}</span></div>
-        <div class="detail-row"><span class="detail-key">Rate/Acre</span><span class="detail-val">$${parseFloat(o.RatePerAcre||0).toFixed(2)}</span></div>
-        <div class="detail-row"><span class="detail-key">Est. Total</span><span class="detail-val">${estTotal}</span></div>
-        <div class="detail-row"><span class="detail-key">Chem Cost</span><span class="detail-val">${chemCost}</span></div>
-        <div class="detail-row"><span class="detail-key">Chem Supplied</span><span class="detail-val">${o.ChemicalSuppliedBy||o.SuppliedBy||'—'}</span></div>
-        <div class="detail-row"><span class="detail-key">Invoiced</span><span class="detail-val">${o.Invoiced}</span></div>
+        <div class="detail-section-title">Fields</div>
+        ${fields.length ? fields.map(f => `
+          <div class="detail-row"><span>${f.FieldName}</span><span>${f.Acres ? parseFloat(f.Acres).toFixed(1)+' ac' : '—'}</span></div>
+        `).join('') : '<div style="color:var(--text-sub);font-size:0.85rem">No fields linked</div>'}
+        ${o.TotalAcres ? `<div class="detail-row" style="border-top:1px solid var(--border);margin-top:0.5rem;padding-top:0.5rem"><span><strong>Total</strong></span><strong>${parseFloat(o.TotalAcres).toFixed(1)} ac</strong></div>` : ''}
+      </div>
+      <div class="detail-card">
+        <div class="detail-section-title">Pricing</div>
+        <div class="detail-row"><span>Type</span><span>${o.PricingType || '—'}</span></div>
+        <div class="detail-row"><span>Rate/Acre</span><span>${o.RatePerAcre ? '$'+parseFloat(o.RatePerAcre).toFixed(2) : '—'}</span></div>
+        <div class="detail-row"><span>Chem Cost</span><span>${chemCost}</span></div>
+        <div class="detail-row"><span>Est. Total</span><strong>${estTotal}</strong></div>
+        <div class="detail-row"><span>Invoiced</span><span>${o.Invoiced || 'No'}</span></div>
       </div>
     </div>
-
-    <div class="detail-card" style="margin-bottom:1.25rem">
-      <div class="detail-card-title">Chemical Mix</div>
+    <div class="detail-card" style="margin-top:1rem">
+      <div class="detail-section-title">Chemical Mix</div>
       ${chemTable}
     </div>
-
-    <div class="detail-card">
-      <div class="detail-card-title">Attachments</div>
-      ${attachLink}
-    </div>
+    ${o.Notes ? `<div class="detail-card" style="margin-top:1rem"><div class="detail-section-title">Notes</div><p style="color:var(--text-sub);font-size:0.85rem">${o.Notes}</p></div>` : ''}
   `;
-
-  // Show/hide action buttons
-  document.getElementById('btnMarkComplete').style.display = o.Status !== 'Completed' ? '' : 'none';
-  document.getElementById('btnMarkInvoiced').style.display = o.Invoiced !== 'Yes' ? '' : 'none';
 
   navigateTo('order-detail');
 }
 
-async function markComplete() {
-  const o = DB.orders.find(x => x.OrderID === currentOrderId);
-  if (!o) return;
-  o.Status = 'Completed';
-  o.CompletedDate = new Date().toISOString().split('T')[0];
-  await writeRow('orders', o);
-  viewOrder(currentOrderId);
-  showToast('Order marked complete', 'success');
-}
 
-async function markInvoiced() {
-  const o = DB.orders.find(x => x.OrderID === currentOrderId);
-  if (!o) return;
-  o.Invoiced = 'Yes';
-  await writeRow('orders', o);
-  viewOrder(currentOrderId);
-  showToast('Order marked invoiced', 'success');
-}
-
-// ── CUSTOMERS ────────────────────────────────────────────────────────────────
 function renderCustomers() {
   filterCustomers();
 }
@@ -391,7 +350,7 @@ function filterCustomers() {
   document.getElementById('customersList').innerHTML = filtered.length ?
     filtered.map(c => {
       const orders = DB.orders.filter(o => o.CustomerID === c.CustomerID);
-      const totalAcres = orders.reduce((s, o) => s + parseFloat(o.Acres||0), 0);
+      const totalAcres = orders.reduce((s, o) => s + parseFloat(o.TotalAcres||0), 0);
       return `<div class="customer-card" onclick="editCustomer('${c.CustomerID}')">
         <div class="customer-name">${c.Name}</div>
         <div class="customer-info">
@@ -796,7 +755,7 @@ function filterFields() { renderFields(); }
 function showNewFieldModal(presetCustomerId) {
   document.getElementById('fieldModalTitle').textContent = 'New Field';
   document.getElementById('editFieldId').value = '';
-  // fFieldName moved to Fields tab
+  document.getElementById('fFieldName').value = '';
   document.getElementById('fFieldAcres').value = '';
   document.getElementById('fFieldLat').value = '';
   document.getElementById('fFieldLng').value = '';
@@ -991,7 +950,7 @@ function renderCalculator() {
         <input type="checkbox" id="calc_${o.OrderID}" ${selectedCalcOrders.has(o.OrderID) ? 'checked' : ''}>
         <div>
           <div style="font-weight:500">${o.OrderID} — ${o.CustomerName}</div>
-          <div style="font-size:0.75rem;color:var(--text-sub)">${o.FieldName} · ${o.Acres} ac · ${o.CropType}</div>
+          <div style="font-size:0.75rem;color:var(--text-sub)">${DB.orderFields.filter(f=>f.OrderID===o.OrderID).map(f=>f.FieldName).join(', ')||'—'} · ${o.TotalAcres||0} ac · ${o.CropType}</div>
         </div>
       </div>`).join('') :
     '<div style="color:var(--text-sub);font-size:0.82rem">No orders with chemicals found</div>';
@@ -1020,7 +979,7 @@ function runCalc() {
   const tankSize = parseFloat(document.getElementById('tankSize')?.value || 100);
   const totalAcres = [...selectedCalcOrders].reduce((sum, id) => {
     const o = DB.orders.find(x => x.OrderID === id);
-    return sum + parseFloat(o?.Acres || 0);
+    return sum + parseFloat(o?.TotalAcres || 0);
   }, 0);
 
   // Aggregate chemicals across selected orders
@@ -1073,7 +1032,7 @@ function renderReports() {
   const acresByCrop = {};
   DB.orders.filter(o => o.Status === 'Completed').forEach(o => {
     const crop = o.CropType || 'Unknown';
-    acresByCrop[crop] = (acresByCrop[crop] || 0) + parseFloat(o.Acres || 0);
+    acresByCrop[crop] = (acresByCrop[crop] || 0) + parseFloat(o.TotalAcres || 0);
   });
   const totalAcres = Object.values(acresByCrop).reduce((s, v) => s + v, 0);
 
@@ -1113,21 +1072,22 @@ function renderReports() {
 
 // ── ORDER MODAL ──────────────────────────────────────────────────────────────
 function showNewOrderModal() {
+  orderFieldsSelected = [];
   document.getElementById('editOrderId').value = '';
   document.getElementById('modalTitle').textContent = 'New Order';
 
-  // Reset fields
-  ['fFieldName','fAcres','fLat','fLng','fPolygon','fNotes','fAttachments','fRatePerAcre'].forEach(id => {
-    document.getElementById(id).value = '';
+  ['fNotes','fAttachments','fRatePerAcre','fPlantingDate','fRelativeMaturity','fScheduledDate'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
   });
   document.getElementById('fStatus').value = 'Open';
   document.getElementById('fPricingType').value = 'Flat Rate';
   document.getElementById('fCropType').value = 'Corn';
   document.getElementById('fInvoiced').value = 'No';
-  document.getElementById('fChemSupplied').value = 'Me';
   document.getElementById('chemicalLines').innerHTML = '';
   document.getElementById('fTemplate').value = '';
 
+  renderOrderFieldsList();
   populateModalDropdowns();
   openModal('orderModal');
 }
@@ -1139,20 +1099,26 @@ function editCurrentOrder() {
 
   document.getElementById('editOrderId').value = o.OrderID;
   document.getElementById('modalTitle').textContent = 'Edit Order — ' + o.OrderID;
-  document.getElementById('fFieldName').value = o.FieldName;
-  document.getElementById('fAcres').value = o.Acres;
-  document.getElementById('fLat').value = o.FieldLat;
-  document.getElementById('fLng').value = o.FieldLng;
-  document.getElementById('fPolygon').value = o.FieldPolygonKML;
-  document.getElementById('fNotes').value = o.Notes;
-  document.getElementById('fAttachments').value = o.Attachments;
-  document.getElementById('fRatePerAcre').value = o.RatePerAcre;
-  document.getElementById('fStatus').value = o.Status;
-  document.getElementById('fPricingType').value = o.PricingType;
-  document.getElementById('fCropType').value = o.CropType;
-  document.getElementById('fInvoiced').value = o.Invoiced;
+  document.getElementById('fNotes').value = o.Notes || '';
+  document.getElementById('fAttachments').value = o.Attachments || '';
+  document.getElementById('fRatePerAcre').value = o.RatePerAcre || '';
+  document.getElementById('fStatus').value = o.Status || 'Open';
+  document.getElementById('fPricingType').value = o.PricingType || 'Flat Rate';
+  document.getElementById('fCropType').value = o.CropType || 'Corn';
+  document.getElementById('fInvoiced').value = o.Invoiced || 'No';
+  document.getElementById('fPlantingDate').value = o.PlantingDate || '';
+  document.getElementById('fRelativeMaturity').value = o.RelativeMaturity || '';
+  document.getElementById('fScheduledDate').value = o.ScheduledDate || '';
 
-  // Set customer/pilot selects
+  // Load selected fields from orderFields
+  orderFieldsSelected = DB.orderFields
+    .filter(f => f.OrderID === o.OrderID)
+    .map(f => DB.fields.find(x => x.FieldID === f.FieldID) || {
+      FieldID: f.FieldID, FieldName: f.FieldName, Acres: f.Acres
+    });
+  renderOrderFieldsList();
+
+  // Set customer/pilot selects after DOM settles
   setTimeout(() => {
     document.getElementById('fCustomer').value = o.CustomerID;
     document.getElementById('fPilot').value = o.PilotID;
