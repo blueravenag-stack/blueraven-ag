@@ -798,6 +798,20 @@ function showEditFieldModal(fieldId) {
     sel.appendChild(o);
   });
 
+  // Reload polygon preview from stored KML
+  const preview = document.getElementById('fieldPolygonPreview');
+  if (preview) {
+    if (f.PolygonKML) {
+      const pts = GeoUtils.parsePolygon(f.PolygonKML);
+      preview.innerHTML = pts ? GeoUtils.polygonToSVG(pts, { width: 220, height: 120 }) : '';
+    } else {
+      preview.innerHTML = '';
+    }
+  }
+  // Clear the hidden KML input so we don't carry over from last edit
+  const kmlHidden = document.getElementById('fFieldKML');
+  if (kmlHidden) kmlHidden.value = f.PolygonKML || '';
+
   openModal('fieldModal');
 }
 
@@ -964,7 +978,16 @@ function openMapForOrder() {
     centerLat,
     centerLng,
     customerAddress: addr,
-    onConfirm: (mapFields) => onMapFieldsConfirmed(mapFields, custId, cust?.Name || '')
+    onConfirm: async (mapFields) => {
+      // Prompt for name on drawn/pasted fields before saving
+      for (const mf of mapFields) {
+        if ((mf.id.startsWith('DRAWN') || mf.id.startsWith('PASTE')) && !mf.fieldName) {
+          const name = prompt(`Name this drawn field (${mf.acres} ac):`, 'New Field');
+          mf.fieldName = name || ('Field-' + mf.id.slice(-4));
+        }
+      }
+      await onMapFieldsConfirmed(mapFields, custId, cust?.Name || '');
+    }
   });
 }
 
@@ -981,7 +1004,7 @@ async function onMapFieldsConfirmed(mapFields, custId, custName) {
       // Create new Field record
       const ctr = mf.centroid || GeoUtils.centroid(mf.points);
       const fieldId = nextId('FLD', DB.fields.map(f => f.FieldID));
-      const suggestedName = mf.farmNum ? `Farm ${mf.farmNum} Field ${mf.id}` : `Field ${fieldId}`;
+      const suggestedName = mf.fieldName || (mf.farmNum ? `Farm ${mf.farmNum} Field ${mf.id}` : `Field ${fieldId}`);
 
       const field = {
         FieldID:      fieldId,
@@ -1055,6 +1078,34 @@ function openMapForField() {
   });
 }
 
+
+// ── UNIT CONVERSION ───────────────────────────────────────────────────────────
+function smartUnit(amount, unit) {
+  // Convert to sensible display unit based on quantity
+  const u = (unit || '').toLowerCase().trim();
+  if (['fl oz', 'fl. oz', 'floz', 'oz'].includes(u)) {
+    if (amount >= 128) return { val: (amount / 128).toFixed(2), unit: 'gal' };
+    if (amount >= 32)  return { val: (amount / 32).toFixed(2),  unit: 'qt' };
+    if (amount >= 16)  return { val: (amount / 16).toFixed(2),  unit: 'pt' };
+    return { val: amount.toFixed(1), unit };
+  }
+  if (u === 'ml') {
+    if (amount >= 3785) return { val: (amount / 3785).toFixed(2), unit: 'gal' };
+    if (amount >= 1000) return { val: (amount / 1000).toFixed(2), unit: 'L' };
+    return { val: amount.toFixed(1), unit };
+  }
+  if (u === 'lb' || u === 'lbs') {
+    if (amount >= 2000) return { val: (amount / 2000).toFixed(2), unit: 'ton' };
+    return { val: amount.toFixed(2), unit: 'lb' };
+  }
+  return { val: amount % 1 === 0 ? amount : amount.toFixed(2), unit };
+}
+
+function fmtAmt(amount, unit) {
+  const { val, unit: u } = smartUnit(amount, unit);
+  return `${val} ${u}`;
+}
+
 // ── BATCH CALCULATOR ─────────────────────────────────────────────────────────
 function renderCalculator() {
   switchCalcTab('orders', document.querySelector('.calc-tab'));
@@ -1062,7 +1113,7 @@ function renderCalculator() {
 
 function switchCalcTab(tab, el) {
   document.querySelectorAll('.calc-tab').forEach(t => t.classList.remove('active'));
-  document.querySelectorAll('.calc-tab-content').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('#view-calculator .tab-content').forEach(t => t.classList.remove('active'));
   if (el) el.classList.add('active');
   document.getElementById('calcTab-' + tab).classList.add('active');
   if (tab === 'orders') renderOrderCalc();
@@ -1126,14 +1177,16 @@ function runOrderCalc() {
   if (!chems.length) { resultsEl.innerHTML = '<div class="calc-empty">No chemicals on selected orders</div>'; return; }
 
   const perLoadRows = chems.map(c => {
-    const perLoad = loadsNeeded > 0 ? (c.totalUnits / loadsNeeded).toFixed(2) : '—';
-    const cost    = c.costPerUnit > 0 ? '$' + (c.totalUnits * c.costPerUnit).toFixed(2) : '';
+    const totalDisp = fmtAmt(c.totalUnits, c.unit);
+    const perLoadAmt = loadsNeeded > 0 ? c.totalUnits / loadsNeeded : 0;
+    const perLoadDisp = loadsNeeded > 0 ? fmtAmt(perLoadAmt, c.unit) : '—';
+    const cost = c.costPerUnit > 0 ? ' · $' + (c.totalUnits * c.costPerUnit).toFixed(2) : '';
     return `<div class="calc-result-item">
       <div class="calc-product-name">${c.name}</div>
-      <div class="calc-product-qty">${c.totalUnits.toFixed(1)} ${c.unit} total</div>
+      <div class="calc-product-qty">${totalDisp} total</div>
       <div class="calc-product-detail">
-        <span>${perLoad} ${c.unit}/load</span>
-        <span>${cost}</span>
+        <span>${perLoadDisp}/load${cost}</span>
+        <span style="color:var(--text-sub);font-size:0.75rem">${c.ratePerAc.toFixed(1)} ${c.unit}/ac</span>
       </div>
     </div>`;
   }).join('');
@@ -1165,33 +1218,39 @@ function renderMixCalc() {
 function runMixCalc() {
   const resultsEl = document.getElementById('mixCalcResults');
   if (!resultsEl) return;
-  const tmplId  = document.getElementById('mixCalcTemplate')?.value;
-  const galPerAc= parseFloat(document.getElementById('mixCalcGalPerAc')?.value || 15);
-  const totalGal= parseFloat(document.getElementById('mixCalcTotalGal')?.value || 0);
-  const tankSize = parseFloat(document.getElementById('mixCalcTankSize')?.value || 100);
+  const tmplId   = document.getElementById('mixCalcTemplate')?.value;
+  const galPerAc = parseFloat(document.getElementById('mixCalcGalPerAc')?.value || 15);
+  const totalGal = parseFloat(document.getElementById('mixCalcTotalGal')?.value || 0);
+  const totalAcIn= parseFloat(document.getElementById('mixCalcAcres')?.value || 0);
+  const tankSize  = parseFloat(document.getElementById('mixCalcTankSize')?.value || 100);
 
   if (!tmplId) { resultsEl.innerHTML = '<div class="calc-empty">Select a mix template above</div>'; return; }
-  if (!totalGal && !tankSize) { resultsEl.innerHTML = '<div class="calc-empty">Enter total gallons or tank size</div>'; return; }
 
   const prods = DB.templateProds.filter(p => p.TemplateID === tmplId);
   if (!prods.length) { resultsEl.innerHTML = '<div class="calc-empty">No chemicals in this template</div>'; return; }
 
-  // Calculate from total gallons (or tank size if no total given)
-  const gallons  = totalGal || tankSize;
-  const acres    = galPerAc > 0 ? (gallons / galPerAc).toFixed(1) : '?';
-  const loads    = totalGal && tankSize > 0 ? Math.ceil(totalGal / tankSize) : 1;
-  const galPerLoad = loads > 0 ? (gallons / loads).toFixed(0) : gallons;
+  // Derive gallons from whichever input was provided
+  let gallons = 0;
+  if (totalGal > 0)       gallons = totalGal;
+  else if (totalAcIn > 0) gallons = totalAcIn * galPerAc;
+  else if (tankSize > 0)  gallons = tankSize;
+  if (!gallons) { resultsEl.innerHTML = '<div class="calc-empty">Enter total gallons, acres, or tank size</div>'; return; }
+
+  const acres    = galPerAc > 0 ? gallons / galPerAc : 0;
+  const loads    = tankSize > 0 ? Math.ceil(gallons / tankSize) : 1;
+  const galPerLoad = loads > 0 ? gallons / loads : gallons;
 
   const rows = prods.map(p => {
-    const rate     = parseFloat(p.RatePerAcre || 0);
-    const totalAc  = galPerAc > 0 ? gallons / galPerAc : 0;
-    const totalAmt = (rate * totalAc).toFixed(2);
-    const perLoad  = loads > 0 ? (rate * totalAc / loads).toFixed(2) : totalAmt;
+    const rate       = parseFloat(p.RatePerAcre || 0);
+    const totalAmt   = rate * acres;
+    const perLoadAmt = loads > 0 ? totalAmt / loads : totalAmt;
+    const totalDisp  = fmtAmt(totalAmt, p.Unit);
+    const perDisp    = fmtAmt(perLoadAmt, p.Unit);
     return `<div class="calc-result-item">
       <div class="calc-product-name">${p.ProductName}</div>
-      <div class="calc-product-qty">${totalAmt} ${p.Unit} total</div>
+      <div class="calc-product-qty">${totalDisp} total</div>
       <div class="calc-product-detail">
-        <span>${perLoad} ${p.Unit}/load · ${rate} ${p.Unit}/ac</span>
+        <span>${perDisp}/load · ${rate} ${p.Unit}/ac</span>
         <span style="color:var(--text-sub)">${p.SuppliedBy === 'Customer' ? 'By customer' : ''}</span>
       </div>
     </div>`;
@@ -1200,9 +1259,9 @@ function runMixCalc() {
   resultsEl.innerHTML = `
     <div class="calc-summary-row">
       <div class="calc-summary-item"><div class="calc-summary-val">${gallons.toFixed(0)}</div><div class="calc-summary-lbl">Total Gal</div></div>
-      <div class="calc-summary-item"><div class="calc-summary-val">${acres}</div><div class="calc-summary-lbl">Est. Acres</div></div>
+      <div class="calc-summary-item"><div class="calc-summary-val">${acres.toFixed(1)}</div><div class="calc-summary-lbl">Acres</div></div>
       <div class="calc-summary-item accent"><div class="calc-summary-val">${loads}</div><div class="calc-summary-lbl">Loads</div></div>
-      <div class="calc-summary-item"><div class="calc-summary-val">${galPerLoad}</div><div class="calc-summary-lbl">Gal/Load</div></div>
+      <div class="calc-summary-item"><div class="calc-summary-val">${galPerLoad.toFixed(0)}</div><div class="calc-summary-lbl">Gal/Load</div></div>
     </div>
     ${rows}`;
 }

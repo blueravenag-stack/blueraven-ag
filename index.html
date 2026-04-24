@@ -273,16 +273,21 @@
               <option value="">— Select template —</option>
             </select>
           </div>
+          <p style="font-size:0.78rem;color:var(--text-sub);margin:0.25rem 0 0.5rem">Enter acres OR total gallons — the other is calculated automatically.</p>
           <div style="display:flex;gap:0.75rem;flex-wrap:wrap;margin-top:0.5rem">
-            <div class="calc-tank" style="flex:1;min-width:100px">
+            <div class="calc-tank" style="flex:1;min-width:90px">
+              <label class="form-label">Acres</label>
+              <input class="form-input" type="number" id="mixCalcAcres" placeholder="e.g. 120" oninput="runMixCalc()">
+            </div>
+            <div class="calc-tank" style="flex:1;min-width:90px">
               <label class="form-label">Total Gallons</label>
               <input class="form-input" type="number" id="mixCalcTotalGal" placeholder="e.g. 400" oninput="runMixCalc()">
             </div>
-            <div class="calc-tank" style="flex:1;min-width:100px">
+            <div class="calc-tank" style="flex:1;min-width:90px">
               <label class="form-label">Tank Size (gal)</label>
               <input class="form-input" type="number" id="mixCalcTankSize" value="100" oninput="runMixCalc()">
             </div>
-            <div class="calc-tank" style="flex:1;min-width:100px">
+            <div class="calc-tank" style="flex:1;min-width:90px">
               <label class="form-label">Spray Rate (gal/ac)</label>
               <input class="form-input" type="number" id="mixCalcGalPerAc" value="15" oninput="runMixCalc()">
             </div>
@@ -514,6 +519,10 @@
     <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap">
       <button class="btn-secondary" id="mapDrawBtn" onclick="MapModal.toggleDraw()">✏ Draw Field</button>
       <button class="btn-secondary" id="mapFinishBtn" onclick="MapModal.finishDrawBtn()" style="display:none">✓ Finish</button>
+      <label class="btn-secondary" style="cursor:pointer" title="Load CLU shapefile (.zip) or GeoJSON">
+        📂 Load CLU File
+        <input type="file" accept=".zip,.geojson,.json" style="display:none" onchange="MapModal.loadShapefileInput(this)">
+      </label>
       <button class="btn-secondary" onclick="MapModal.showPastePanel(true)">📋 Paste KML</button>
       <button class="modal-close" onclick="MapModal.close()">×</button>
     </div>
@@ -549,6 +558,8 @@
 
 <div class="toast" id="toast"></div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="https://unpkg.com/shapefile@0.6.6/dist/shapefile.js"></script>
 <script src="geo.js"></script>
 <script src="mapModal.js"></script>
 <script src="app.js"></script>

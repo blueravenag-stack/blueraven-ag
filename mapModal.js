@@ -228,12 +228,15 @@ window.MapModal = (() => {
       return;
     }
 
-    el.innerHTML = selectedFields.map(f => `
-      <div class="map-sel-chip">
-        <span>${f.isDrawn ? '✏ Drawn' : f.isPasted ? '📋 Pasted' : 'CLU ' + (f.id || '?')}</span>
+    el.innerHTML = selectedFields.map(f => {
+      // Use field name if it was saved as a DB field, otherwise show type label
+      const label = f.fieldName || (f.isDrawn ? '✏ Drawn field' : f.isPasted ? '📋 Pasted field' : f.id || 'Field');
+      return `<div class="map-sel-chip">
+        <span>${label}</span>
         <span>${parseFloat(f.acres).toFixed(1)} ac</span>
         <button onclick="MapModal.removeSelected('${f.id}')">×</button>
-      </div>`).join('') +
+      </div>`;
+    }).join('') +
       `<div class="map-sel-total">${total.toFixed(1)} ac total</div>`;
 
     if (btn) btn.disabled = false;
@@ -266,12 +269,13 @@ window.MapModal = (() => {
     if (!selectedFields.length) return;
     if (onConfirmCb) {
       onConfirmCb(selectedFields.map(f => ({
-        id:       f.id,
-        farmNum:  f.farmNum || '',
-        acres:    f.acres,
-        points:   f.points,
-        kml:      GeoUtils.pointsToKML(f.points),
-        centroid: GeoUtils.centroid(f.points)
+        id:        f.id,
+        farmNum:   f.farmNum || '',
+        acres:     f.acres,
+        points:    f.points,
+        kml:       GeoUtils.pointsToKML(f.points),
+        centroid:  GeoUtils.centroid(f.points),
+        fieldName: f.fieldName || ''
       })));
     }
     close();
@@ -296,7 +300,103 @@ window.MapModal = (() => {
     return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
   }
 
+
+  // ── SHAPEFILE / CLU LOAD ──────────────────────────────────────────────────
+  // Accepts .zip (shapefile package) or .geojson / .json file
+  // User downloads CLU zip from USDA Geospatial Data Gateway:
+  //   https://gdg.sc.egov.usda.gov/GDGOrder.aspx
+  //   Illinois > Common Land Unit (CLU) > Select your county
+
+  async function loadShapefileInput(input) {
+    const file = input.files[0];
+    if (!file) return;
+    setStatus('Reading file...');
+
+    try {
+      if (file.name.endsWith('.geojson') || file.name.endsWith('.json')) {
+        const text = await file.text();
+        loadGeoJSON(JSON.parse(text));
+      } else if (file.name.endsWith('.zip')) {
+        await loadShapefileZip(file);
+      } else {
+        setStatus('⚠ Upload a .zip (shapefile) or .geojson file');
+      }
+    } catch(e) {
+      console.error(e);
+      setStatus('⚠ Error reading file: ' + e.message);
+    }
+    input.value = ''; // reset so same file can be reloaded
+  }
+
+  async function loadShapefileZip(file) {
+    // Requires JSZip + shapefile.js (loaded in index.html)
+    if (typeof JSZip === 'undefined' || typeof shapefile === 'undefined') {
+      setStatus('⚠ Shapefile libraries not loaded — refresh and try again');
+      return;
+    }
+    setStatus('Unzipping shapefile...');
+    const zip = await JSZip.loadAsync(file);
+    
+    // Find .shp and .dbf files
+    const shpFile = Object.values(zip.files).find(f => f.name.toLowerCase().endsWith('.shp'));
+    const dbfFile = Object.values(zip.files).find(f => f.name.toLowerCase().endsWith('.dbf'));
+    
+    if (!shpFile) { setStatus('⚠ No .shp file found in zip'); return; }
+    
+    setStatus('Parsing fields...');
+    const shpBuf = await shpFile.async('arraybuffer');
+    const dbfBuf = dbfFile ? await dbfFile.async('arraybuffer') : null;
+    
+    const source = await shapefile.open(shpBuf, dbfBuf);
+    const features = [];
+    let result = await source.read();
+    while (!result.done) {
+      features.push(result.value);
+      result = await source.read();
+    }
+    
+    const geojson = { type: 'FeatureCollection', features };
+    loadGeoJSON(geojson);
+  }
+
+  function loadGeoJSON(geojson) {
+    cluLayer.clearLayers();
+    const features = geojson.features || [];
+    let count = 0;
+
+    features.forEach((feat, i) => {
+      const points = GeoUtils.parsePolygon(JSON.stringify(feat.geometry));
+      if (!points || points.length < 3) return;
+      
+      const props  = feat.properties || {};
+      const acres  = parseFloat(props.CALCACRES || props.clu_calculated_acreage || props.ACRES || GeoUtils.calcAcres(points)).toFixed(1);
+      const farmNum= String(props.FARMNBR || props.farm_number || props.FARM_NUM || '');
+      const cluNum = String(props.CLUNBR || props.clu_number || props.CLU_NUM || props.FID || i);
+
+      const isSelected = selectedFields.some(s => s.id === cluNum);
+      const poly = L.polygon(points.map(p => [p.lat, p.lng]), fieldStyle(isSelected)).addTo(cluLayer);
+      
+      const field = { id: cluNum, farmNum, acres, points, fromFile: true };
+      poly._field = field;
+      if (isSelected) { const sf = selectedFields.find(s=>s.id===cluNum); if(sf) sf.polygon=poly; }
+      
+      poly.on('click', e => { L.DomEvent.stopPropagation(e); toggleField(poly); });
+      poly.bindTooltip(
+        `${acres} ac${farmNum ? ' · Farm ' + farmNum : ''}`,
+        { permanent: false, direction: 'center', className: 'clu-tooltip' }
+      );
+      count++;
+    });
+
+    if (count > 0) {
+      map.fitBounds(cluLayer.getBounds(), { padding: [20,20] });
+      setStatus(`${count} fields loaded — tap to select`);
+    } else {
+      setStatus('⚠ No valid polygons found in file');
+    }
+  }
+
   // ── PUBLIC ────────────────────────────────────────────────────────────────
-  return { open, close, confirm, toggleDraw, finishDrawBtn, removeSelected, showPastePanel, applyPastedKML, searchAddress };
+  return { open, close, confirm, toggleDraw, finishDrawBtn, removeSelected, showPastePanel, applyPastedKML, searchAddress, loadShapefileInput };
 
 })();
