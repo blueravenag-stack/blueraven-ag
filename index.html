@@ -237,103 +237,94 @@
   </div>
 
   <div class="view" id="view-calculator">
-    <div class="view-header">
-      <h1 class="view-title">Batch Calculator</h1>
+    <div class="view-header"><h1 class="view-title">Batch Calculator</h1></div>
+    <div class="tabs">
+      <button class="tab calc-tab active" onclick="switchCalcTab('orders', this)">Order Batch</button>
+      <button class="tab calc-tab" onclick="switchCalcTab('mix', this)">Mix Calc</button>
     </div>
-    <div class="calc-container">
-      <div class="calc-panel">
-        <h3 class="panel-title">Select Orders to Batch</h3>
-        <p class="panel-sub">Select one or more orders with the same mix to calculate combined chemical needs.</p>
-        <div id="calcOrderList" class="calc-order-list"></div>
-        <div class="calc-tank">
-          <label class="form-label">Tank Size (gallons)</label>
-          <input class="form-input" type="number" id="tankSize" value="100" oninput="runCalc()">
+    <div id="calcTab-orders" class="tab-content active">
+      <div class="calc-container">
+        <div class="calc-panel">
+          <h3 class="panel-title">Select Orders</h3>
+          <p class="panel-sub">Select orders to calculate combined chemical quantities and tank loads.</p>
+          <div id="calcOrderList" class="calc-order-list"></div>
+          <div style="display:flex;gap:0.75rem;flex-wrap:wrap;margin-top:0.75rem">
+            <div class="calc-tank" style="flex:1;min-width:100px">
+              <label class="form-label">Tank Size (gal)</label>
+              <input class="form-input" type="number" id="tankSize" value="100" oninput="runOrderCalc()">
+            </div>
+            <div class="calc-tank" style="flex:1;min-width:100px">
+              <label class="form-label">Spray Rate (gal/ac)</label>
+              <input class="form-input" type="number" id="calcGalPerAc" value="15" oninput="runOrderCalc()">
+            </div>
+          </div>
         </div>
+        <div class="calc-results" id="calcResults"><div class="calc-empty">Select orders to see requirements</div></div>
       </div>
-      <div class="calc-results" id="calcResults">
-        <div class="calc-empty">Select orders to see chemical requirements</div>
+    </div>
+    <div id="calcTab-mix" class="tab-content">
+      <div class="calc-container">
+        <div class="calc-panel">
+          <h3 class="panel-title">Mix Calculator</h3>
+          <p class="panel-sub">Calculate chemical quantities for any batch size without needing an order.</p>
+          <div class="form-group">
+            <label class="form-label">Mix Template</label>
+            <select class="form-input" id="mixCalcTemplate" onchange="runMixCalc()">
+              <option value="">— Select template —</option>
+            </select>
+          </div>
+          <div style="display:flex;gap:0.75rem;flex-wrap:wrap;margin-top:0.5rem">
+            <div class="calc-tank" style="flex:1;min-width:100px">
+              <label class="form-label">Total Gallons</label>
+              <input class="form-input" type="number" id="mixCalcTotalGal" placeholder="e.g. 400" oninput="runMixCalc()">
+            </div>
+            <div class="calc-tank" style="flex:1;min-width:100px">
+              <label class="form-label">Tank Size (gal)</label>
+              <input class="form-input" type="number" id="mixCalcTankSize" value="100" oninput="runMixCalc()">
+            </div>
+            <div class="calc-tank" style="flex:1;min-width:100px">
+              <label class="form-label">Spray Rate (gal/ac)</label>
+              <input class="form-input" type="number" id="mixCalcGalPerAc" value="15" oninput="runMixCalc()">
+            </div>
+          </div>
+        </div>
+        <div class="calc-results" id="mixCalcResults"><div class="calc-empty">Select a template and enter gallons above</div></div>
       </div>
     </div>
   </div>
-
-  <!-- ── REPORTS ── -->
   <div class="view" id="view-reports">
-    <div class="view-header">
-      <h1 class="view-title">Reports</h1>
-    </div>
+    <div class="view-header"><h1 class="view-title">Reports</h1></div>
     <div class="report-grid">
-      <div class="report-card">
-        <h3 class="report-title">Acres Treated</h3>
-        <div id="reportAcres"></div>
-      </div>
-      <div class="report-card">
-        <h3 class="report-title">Product Usage</h3>
-        <div id="reportProducts"></div>
-      </div>
-      <div class="report-card">
-        <h3 class="report-title">Revenue Summary</h3>
-        <div id="reportRevenue"></div>
-      </div>
+      <div class="report-card"><h3 class="report-title">Acres Treated</h3><div id="reportAcres"></div></div>
+      <div class="report-card"><h3 class="report-title">Product Usage</h3><div id="reportProducts"></div></div>
+      <div class="report-card"><h3 class="report-title">Revenue Summary</h3><div id="reportRevenue"></div></div>
     </div>
   </div>
 
 </main>
 
-<!-- ── MODALS ── -->
 <div class="modal-overlay" id="modalOverlay" onclick="closeModal()"></div>
 
-<!-- New/Edit Order Modal -->
 <div class="modal" id="orderModal">
-  <div class="modal-header">
-    <h2 class="modal-title" id="modalTitle">New Order</h2>
-    <button class="modal-close" onclick="closeModal()">×</button>
-  </div>
+  <div class="modal-header"><h2 class="modal-title" id="modalTitle">New Order</h2><button class="modal-close" onclick="closeModal()">×</button></div>
   <div class="modal-body">
     <input type="hidden" id="editOrderId">
-
     <div class="form-section">
       <div class="form-section-title">Job Info</div>
       <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Customer *</label>
-          <select class="form-input" id="fCustomer" onchange="loadCustomerFields()"></select>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Crop Type</label>
-          <select class="form-input" id="fCropType">
-            <option>Corn</option><option>Soybeans</option><option>Wheat</option>
-            <option>Sorghum</option><option>Cotton</option><option>Other</option>
-          </select>
-        </div>
+        <div class="form-group"><label class="form-label">Customer *</label><select class="form-input" id="fCustomer" onchange="loadCustomerFields()"></select></div>
+        <div class="form-group"><label class="form-label">Crop Type</label><select class="form-input" id="fCropType"><option>Corn</option><option>Soybeans</option><option>Wheat</option><option>Sorghum</option><option>Cotton</option><option>Other</option></select></div>
       </div>
       <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Planting Date</label>
-          <input class="form-input" type="date" id="fPlantingDate">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Relative Maturity (RM)</label>
-          <input class="form-input" type="number" id="fRelativeMaturity" placeholder="e.g. 108">
-        </div>
+        <div class="form-group"><label class="form-label">Planting Date</label><input class="form-input" type="date" id="fPlantingDate"></div>
+        <div class="form-group"><label class="form-label">Relative Maturity (RM)</label><input class="form-input" type="number" id="fRelativeMaturity" placeholder="e.g. 108"></div>
       </div>
       <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Scheduled Date</label>
-          <input class="form-input" type="date" id="fScheduledDate">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Pilot</label>
-          <select class="form-input" id="fPilot"></select>
-        </div>
+        <div class="form-group"><label class="form-label">Scheduled Date</label><input class="form-input" type="date" id="fScheduledDate"></div>
+        <div class="form-group"><label class="form-label">Pilot</label><select class="form-input" id="fPilot"></select></div>
       </div>
-      <div class="form-group">
-        <label class="form-label">Status</label>
-        <select class="form-input" id="fStatus">
-          <option>Open</option><option>Scheduled</option><option>Completed</option>
-        </select>
-      </div>
+      <div class="form-group"><label class="form-label">Status</label><select class="form-input" id="fStatus"><option>Open</option><option>Scheduled</option><option>Completed</option></select></div>
     </div>
-
     <div class="form-section">
       <div class="form-section-title">Fields</div>
       <div id="orderFieldsList" class="order-fields-list"></div>
@@ -345,124 +336,56 @@
         <button class="btn-secondary" onclick="openMapForOrder()">🗺 Map / CLU</button>
       </div>
     </div>
-
     <div class="form-section">
       <div class="form-section-title">Chemical Mix</div>
       <div class="form-row" style="align-items:flex-end;margin-bottom:0.75rem">
-        <div class="form-group" style="flex:1">
-          <label class="form-label">Apply Mix Template</label>
-          <select class="form-input" id="fTemplate">
-            <option value="">— Select template —</option>
-          </select>
-        </div>
+        <div class="form-group" style="flex:1"><label class="form-label">Apply Mix Template</label><select class="form-input" id="fTemplate"><option value="">— Select template —</option></select></div>
         <button class="btn-secondary" style="margin-bottom:0" onclick="applyTemplate()">Apply</button>
       </div>
       <div id="chemicalLines"></div>
       <button class="btn-ghost" onclick="addChemicalLine()">+ Add Chemical</button>
     </div>
-
     <div class="form-section">
       <div class="form-section-title">Pricing</div>
       <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Pricing Type</label>
-          <select class="form-input" id="fPricingType">
-            <option>Flat Rate</option>
-            <option>Flat Rate + Chemical</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Rate Per Acre ($)</label>
-          <input class="form-input" type="number" step="0.01" id="fRatePerAcre" placeholder="0.00">
-        </div>
+        <div class="form-group"><label class="form-label">Pricing Type</label><select class="form-input" id="fPricingType"><option>Flat Rate</option><option>Flat Rate + Chemical</option></select></div>
+        <div class="form-group"><label class="form-label">Rate Per Acre ($)</label><input class="form-input" type="number" step="0.01" id="fRatePerAcre" placeholder="0.00"></div>
       </div>
     </div>
-
     <div class="form-section">
       <div class="form-section-title">Admin</div>
       <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Chemical Supplied By</label>
-          <select class="form-input" id="fChemSupplied">
-            <option>Me</option><option>Customer</option><option>Mixed</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Invoiced</label>
-          <select class="form-input" id="fInvoiced">
-            <option value="No">No</option><option value="Yes">Yes</option>
-          </select>
-        </div>
+        <div class="form-group"><label class="form-label">Invoiced</label><select class="form-input" id="fInvoiced"><option value="No">No</option><option value="Yes">Yes</option></select></div>
       </div>
-      <div class="form-group">
-        <label class="form-label">Notes</label>
-        <textarea class="form-input" id="fNotes" rows="2" placeholder="Any special instructions..."></textarea>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Attachment Folder Link (Google Drive)</label>
-        <input class="form-input" type="url" id="fAttachments" placeholder="Paste Drive folder URL">
-      </div>
+      <div class="form-group"><label class="form-label">Notes</label><textarea class="form-input" id="fNotes" rows="2" placeholder="Any special instructions..."></textarea></div>
+      <div class="form-group"><label class="form-label">Attachment Folder Link</label><input class="form-input" type="url" id="fAttachments" placeholder="Paste Drive folder URL"></div>
     </div>
   </div>
-  <div class="modal-footer">
-    <button class="btn-ghost" onclick="closeModal()">Cancel</button>
-    <button class="btn-primary" onclick="saveOrder()">Save Order</button>
-  </div>
+  <div class="modal-footer"><button class="btn-ghost" onclick="closeModal()">Cancel</button><button class="btn-primary" onclick="saveOrder()">Save Order</button></div>
 </div>
 
-<!-- ── CUSTOMER MODAL ── -->
 <div class="modal" id="customerModal">
-  <div class="modal-header">
-    <h2 class="modal-title" id="customerModalTitle">New Customer</h2>
-    <button class="modal-close" onclick="closeModal()">×</button>
-  </div>
+  <div class="modal-header"><h2 class="modal-title" id="customerModalTitle">New Customer</h2><button class="modal-close" onclick="closeModal()">×</button></div>
   <div class="modal-body">
     <input type="hidden" id="editCustomerId">
     <div class="form-section">
       <div class="form-section-title">Contact Info</div>
       <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Name / Farm Name *</label>
-          <input class="form-input" type="text" id="cName" placeholder="e.g. Smith Farms LLC">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Phone</label>
-          <input class="form-input" type="tel" id="cPhone" placeholder="555-867-5309">
-        </div>
+        <div class="form-group"><label class="form-label">Name / Farm Name *</label><input class="form-input" type="text" id="cName" placeholder="e.g. Smith Farms LLC"></div>
+        <div class="form-group"><label class="form-label">Phone</label><input class="form-input" type="tel" id="cPhone" placeholder="555-867-5309"></div>
       </div>
-      <div class="form-group">
-        <label class="form-label">Email</label>
-        <input class="form-input" type="email" id="cEmail" placeholder="farmer@example.com">
-      </div>
+      <div class="form-group"><label class="form-label">Email</label><input class="form-input" type="email" id="cEmail" placeholder="farmer@example.com"></div>
     </div>
     <div class="form-section">
       <div class="form-section-title">Address</div>
-      <div class="form-group">
-        <label class="form-label">Street Address</label>
-        <input class="form-input" type="text" id="cAddress" placeholder="1234 County Rd 10">
-      </div>
+      <div class="form-group"><label class="form-label">Street Address</label><input class="form-input" type="text" id="cAddress" placeholder="1234 County Rd 10"></div>
       <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">City</label>
-          <input class="form-input" type="text" id="cCity">
-        </div>
-        <div class="form-group">
-          <label class="form-label">State</label>
-          <input class="form-input" type="text" id="cState" maxlength="2" placeholder="NE">
-        </div>
+        <div class="form-group"><label class="form-label">City</label><input class="form-input" type="text" id="cCity"></div>
+        <div class="form-group"><label class="form-label">State</label><input class="form-input" type="text" id="cState" maxlength="2" placeholder="IL"></div>
       </div>
-      <div class="form-group">
-        <label class="form-label">Zip</label>
-        <input class="form-input" type="text" id="cZip" maxlength="10" style="max-width:140px">
-      </div>
+      <div class="form-group"><label class="form-label">Zip</label><input class="form-input" type="text" id="cZip" maxlength="10" style="max-width:140px"></div>
     </div>
-    <div class="form-section">
-      <div class="form-section-title">Notes</div>
-      <div class="form-group">
-        <label class="form-label">Notes</label>
-        <textarea class="form-input" id="cNotes" rows="2" placeholder="Payment terms, preferences, contact notes..."></textarea>
-      </div>
-    </div>
+    <div class="form-section"><div class="form-section-title">Notes</div><div class="form-group"><label class="form-label">Notes</label><textarea class="form-input" id="cNotes" rows="2" placeholder="Payment terms, preferences..."></textarea></div></div>
   </div>
   <div class="modal-footer">
     <button class="btn-danger-ghost" id="btnDeleteCustomer" onclick="deleteCustomer()" style="display:none;margin-right:auto">Delete</button>
@@ -471,61 +394,28 @@
   </div>
 </div>
 
-<!-- ── PRODUCT MODAL ── -->
 <div class="modal" id="productModal">
-  <div class="modal-header">
-    <h2 class="modal-title" id="productModalTitle">New Product</h2>
-    <button class="modal-close" onclick="closeModal()">×</button>
-  </div>
+  <div class="modal-header"><h2 class="modal-title" id="productModalTitle">New Product</h2><button class="modal-close" onclick="closeModal()">×</button></div>
   <div class="modal-body">
     <input type="hidden" id="editProductId">
     <div class="form-section">
       <div class="form-section-title">Product Info</div>
       <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Product Name *</label>
-          <input class="form-input" type="text" id="pName" placeholder="e.g. Roundup PowerMax 3">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Manufacturer</label>
-          <input class="form-input" type="text" id="pManufacturer" placeholder="e.g. Bayer">
-        </div>
+        <div class="form-group"><label class="form-label">Product Name *</label><input class="form-input" type="text" id="pName" placeholder="e.g. Roundup PowerMax 3"></div>
+        <div class="form-group"><label class="form-label">Manufacturer</label><input class="form-input" type="text" id="pManufacturer" placeholder="e.g. Bayer"></div>
       </div>
       <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Unit *</label>
-          <select class="form-input" id="pUnit">
-            <option>fl oz</option>
-            <option>oz</option>
-            <option>lb</option>
-            <option>gallon</option>
-            <option>pint</option>
-            <option>quart</option>
-            <option>ml</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Cost Per Unit ($)</label>
-          <input class="form-input" type="number" step="0.001" id="pCostPerUnit" placeholder="0.00">
-        </div>
+        <div class="form-group"><label class="form-label">Unit *</label><select class="form-input" id="pUnit"><option>fl oz</option><option>oz</option><option>lb</option><option>gallon</option><option>pint</option><option>quart</option><option>ml</option></select></div>
+        <div class="form-group"><label class="form-label">Cost Per Unit ($)</label><input class="form-input" type="number" step="0.001" id="pCostPerUnit" placeholder="0.00"></div>
       </div>
     </div>
     <div class="form-section">
       <div class="form-section-title">Label Requirements</div>
       <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">REI (hours)</label>
-          <input class="form-input" type="number" id="pREI" placeholder="0">
-        </div>
-        <div class="form-group">
-          <label class="form-label">PHI (days)</label>
-          <input class="form-input" type="number" id="pPHI" placeholder="0">
-        </div>
+        <div class="form-group"><label class="form-label">REI (hours)</label><input class="form-input" type="number" id="pREI" placeholder="0"></div>
+        <div class="form-group"><label class="form-label">PHI (days)</label><input class="form-input" type="number" id="pPHI" placeholder="0"></div>
       </div>
-      <div class="form-group">
-        <label class="form-label">Notes (active ingredient, use case, etc.)</label>
-        <textarea class="form-input" id="pNotes" rows="2" placeholder="e.g. Glyphosate 54.5% — burndown herbicide"></textarea>
-      </div>
+      <div class="form-group"><label class="form-label">Notes (active ingredient, use case)</label><textarea class="form-input" id="pNotes" rows="2" placeholder="e.g. Glyphosate 54.5%"></textarea></div>
     </div>
   </div>
   <div class="modal-footer">
@@ -535,42 +425,18 @@
   </div>
 </div>
 
-<!-- ── MIX TEMPLATE MODAL ── -->
 <div class="modal" id="mixModal">
-  <div class="modal-header">
-    <h2 class="modal-title" id="mixModalTitle">New Mix Template</h2>
-    <button class="modal-close" onclick="closeModal()">×</button>
-  </div>
+  <div class="modal-header"><h2 class="modal-title" id="mixModalTitle">New Mix Template</h2><button class="modal-close" onclick="closeModal()">×</button></div>
   <div class="modal-body">
     <input type="hidden" id="editMixId">
     <div class="form-section">
       <div class="form-section-title">Template Info</div>
       <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Template Name *</label>
-          <input class="form-input" type="text" id="mName" placeholder="e.g. Standard Corn Burndown">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Crop Type</label>
-          <select class="form-input" id="mCropType">
-            <option>Corn</option><option>Soybeans</option><option>Wheat</option>
-            <option>Sorghum</option><option>Cotton</option><option>General</option><option>Other</option>
-          </select>
-        </div>
+        <div class="form-group"><label class="form-label">Template Name *</label><input class="form-input" type="text" id="mName" placeholder="e.g. Standard Corn Burndown"></div>
+        <div class="form-group"><label class="form-label">Crop Type</label><select class="form-input" id="mCropType"><option>Corn</option><option>Soybeans</option><option>Wheat</option><option>Sorghum</option><option>Cotton</option><option>General</option><option>Other</option></select></div>
       </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Status</label>
-          <select class="form-input" id="mActive">
-            <option value="Yes">Active</option>
-            <option value="No">Inactive</option>
-          </select>
-        </div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Description</label>
-        <textarea class="form-input" id="mDescription" rows="2" placeholder="When to use this mix, target pest/weed, timing notes..."></textarea>
-      </div>
+      <div class="form-row"><div class="form-group"><label class="form-label">Status</label><select class="form-input" id="mActive"><option value="Yes">Active</option><option value="No">Inactive</option></select></div></div>
+      <div class="form-group"><label class="form-label">Description</label><textarea class="form-input" id="mDescription" rows="2" placeholder="When to use this mix, timing notes..."></textarea></div>
     </div>
     <div class="form-section">
       <div class="form-section-title">Chemical Lineup</div>
@@ -584,8 +450,6 @@
     <button class="btn-primary" onclick="saveMix()">Save Template</button>
   </div>
 </div>
-
-<!-- Toast -->
 
 <div class="modal" id="fieldPickerModal">
   <div class="modal-header">
@@ -643,7 +507,6 @@
   </div>
 </div>
 
-
 <div class="map-overlay" id="mapOverlay" onclick="MapModal.close()"></div>
 <div class="modal modal-map" id="mapModal">
   <div class="modal-header">
@@ -685,7 +548,6 @@
 </div>
 
 <div class="toast" id="toast"></div>
-
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="geo.js"></script>
 <script src="mapModal.js"></script>

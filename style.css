@@ -711,3 +711,12 @@ body.light .leaflet-container { background: #e8e8e8; }
   .map-sidebar-footer { flex-direction: row; margin-top: 0; border-top: none; }
   .map-selected-list { flex-direction: row; flex-wrap: wrap; }
 }
+
+/* ── CALC SUMMARY CARDS ── */
+.calc-summary-row { display:flex; gap:0.75rem; margin-bottom:1rem; flex-wrap:wrap; }
+.calc-summary-item { flex:1; min-width:70px; background:var(--bg3); border:1px solid var(--border); border-radius:var(--radius); padding:0.6rem 0.75rem; text-align:center; }
+.calc-summary-item.accent { border-color:var(--accent); background:rgba(79,195,247,0.08); }
+.calc-summary-val { font-family:var(--font-head); font-size:1.6rem; color:var(--text); line-height:1; }
+.calc-summary-item.accent .calc-summary-val { color:var(--accent); }
+.calc-summary-lbl { font-size:0.68rem; color:var(--text-sub); text-transform:uppercase; letter-spacing:0.07em; margin-top:0.2rem; }
+.calc-tab { font-size:0.85rem; }

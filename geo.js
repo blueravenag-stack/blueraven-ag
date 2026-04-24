@@ -173,27 +173,38 @@ window.GeoUtils = (() => {
 
   function polygonToSVG(points, opts = {}) {
     if (!points || points.length < 3) return '';
-    const W = opts.width  || 200;
-    const H = opts.height || 120;
-    const pad = opts.padding || 8;
-    const color = opts.color || '#4FC3F7';
-    const fill  = opts.fill  || 'rgba(79,195,247,0.15)';
+    const pad   = opts.padding || 10;
+    const color = opts.color   || '#4FC3F7';
+    const fill  = opts.fill    || 'rgba(79,195,247,0.15)';
 
     const lats = points.map(p => p.lat);
     const lngs = points.map(p => p.lng);
     const minLat = Math.min(...lats), maxLat = Math.max(...lats);
     const minLng = Math.min(...lngs), maxLng = Math.max(...lngs);
-    const dLat = maxLat - minLat || 0.001;
-    const dLng = maxLng - minLng || 0.001;
+    const dLat = maxLat - minLat || 0.0001;
+    const dLng = maxLng - minLng || 0.0001;
+
+    // Correct for lng/lat scale difference at this latitude
+    // 1 deg lng = cos(lat) * 1 deg lat in distance
+    const midLat  = (minLat + maxLat) / 2;
+    const lngScale = Math.cos(midLat * Math.PI / 180);
+
+    // Build a square viewbox with correct aspect ratio
+    const dLatM = dLat;                  // normalized lat extent
+    const dLngM = dLng * lngScale;       // normalized lng extent (corrected)
+    const aspect = dLngM / dLatM;        // width / height ratio
+
+    const H = 120;
+    const W = Math.max(80, Math.min(280, Math.round(H * aspect)));
 
     const toSVG = p => {
-      const x = pad + ((p.lng - minLng) / dLng) * (W - 2*pad);
-      const y = H - pad - ((p.lat - minLat) / dLat) * (H - 2*pad);
+      const x = pad + ((p.lng - minLng) * lngScale / dLngM) * (W - 2*pad);
+      const y = H - pad - ((p.lat - minLat) / dLatM) * (H - 2*pad);
       return `${x.toFixed(1)},${y.toFixed(1)}`;
     };
 
     const polyPts = points.map(toSVG).join(' ');
-    return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">
+    return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:${W}px;height:auto;display:block">
   <polygon points="${polyPts}" fill="${fill}" stroke="${color}" stroke-width="1.5" stroke-linejoin="round"/>
 </svg>`;
   }

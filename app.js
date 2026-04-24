@@ -1057,91 +1057,154 @@ function openMapForField() {
 
 // ── BATCH CALCULATOR ─────────────────────────────────────────────────────────
 function renderCalculator() {
-  const eligible = DB.orders.filter(o => {
-    const prods = DB.orderProds.filter(p => p.OrderID === o.OrderID);
-    return prods.length > 0;
-  });
+  switchCalcTab('orders', document.querySelector('.calc-tab'));
+}
 
+function switchCalcTab(tab, el) {
+  document.querySelectorAll('.calc-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.calc-tab-content').forEach(t => t.classList.remove('active'));
+  if (el) el.classList.add('active');
+  document.getElementById('calcTab-' + tab).classList.add('active');
+  if (tab === 'orders') renderOrderCalc();
+  else                  renderMixCalc();
+}
+
+// ── TAB 1: ORDER BATCH CALC ───────────────────────────────────────────────────
+function renderOrderCalc() {
+  const eligible = DB.orders.filter(o => DB.orderProds.some(p => p.OrderID === o.OrderID));
   document.getElementById('calcOrderList').innerHTML = eligible.length ?
     eligible.map(o => `
       <div class="calc-order-item" onclick="toggleCalcOrder('${o.OrderID}', this)">
-        <input type="checkbox" id="calc_${o.OrderID}" ${selectedCalcOrders.has(o.OrderID) ? 'checked' : ''}>
+        <input type="checkbox" id="calc_${o.OrderID}" ${selectedCalcOrders.has(o.OrderID) ? 'checked' : ''} onclick="event.stopPropagation()">
         <div>
           <div style="font-weight:500">${o.OrderID} — ${o.CustomerName}</div>
-          <div style="font-size:0.75rem;color:var(--text-sub)">${DB.orderFields.filter(f=>f.OrderID===o.OrderID).map(f=>f.FieldName).join(', ')||'—'} · ${o.TotalAcres||0} ac · ${o.CropType}</div>
+          <div style="font-size:0.75rem;color:var(--text-sub)">
+            ${DB.orderFields.filter(f=>f.OrderID===o.OrderID).map(f=>f.FieldName).join(', ')||'—'} · ${o.TotalAcres||0} ac · ${o.CropType}
+          </div>
         </div>
       </div>`).join('') :
     '<div style="color:var(--text-sub);font-size:0.82rem">No orders with chemicals found</div>';
-
-  runCalc();
+  runOrderCalc();
 }
 
 function toggleCalcOrder(orderId, el) {
   const cb = document.getElementById('calc_' + orderId);
-  if (selectedCalcOrders.has(orderId)) {
-    selectedCalcOrders.delete(orderId);
-    cb.checked = false;
-  } else {
-    selectedCalcOrders.add(orderId);
-    cb.checked = true;
-  }
-  runCalc();
+  if (selectedCalcOrders.has(orderId)) { selectedCalcOrders.delete(orderId); if(cb) cb.checked = false; }
+  else                                 { selectedCalcOrders.add(orderId);    if(cb) cb.checked = true; }
+  runOrderCalc();
 }
 
-function runCalc() {
+function runOrderCalc() {
+  const resultsEl = document.getElementById('calcResults');
+  if (!resultsEl) return;
   if (selectedCalcOrders.size === 0) {
-    document.getElementById('calcResults').innerHTML = '<div class="calc-empty">Select orders to see chemical requirements</div>';
+    resultsEl.innerHTML = '<div class="calc-empty">Select one or more orders above</div>';
     return;
   }
 
-  const tankSize = parseFloat(document.getElementById('tankSize')?.value || 100);
-  const totalAcres = [...selectedCalcOrders].reduce((sum, id) => {
-    const o = DB.orders.find(x => x.OrderID === id);
-    return sum + parseFloat(o?.TotalAcres || 0);
+  const tankSize  = parseFloat(document.getElementById('tankSize')?.value || 100);
+  const galPerAc  = parseFloat(document.getElementById('calcGalPerAc')?.value || 15);
+  const totalAcres = [...selectedCalcOrders].reduce((s, id) => {
+    return s + parseFloat(DB.orders.find(x => x.OrderID === id)?.TotalAcres || 0);
   }, 0);
+  const totalGallons = totalAcres * galPerAc;
+  const loadsNeeded  = tankSize > 0 ? Math.ceil(totalGallons / tankSize) : 0;
+  const acresPerLoad = loadsNeeded > 0 ? (totalAcres / loadsNeeded).toFixed(1) : 0;
 
-  // Aggregate chemicals across selected orders
+  // Aggregate chemicals
   const chemMap = {};
   [...selectedCalcOrders].forEach(orderId => {
     DB.orderProds.filter(p => p.OrderID === orderId).forEach(p => {
       const key = p.ProductID || p.ProductName;
-      if (!chemMap[key]) {
-        chemMap[key] = { name: p.ProductName, unit: p.Unit, total: 0, costPerUnit: parseFloat(p.CostPerUnit||0) };
-      }
-      chemMap[key].total += parseFloat(p.TotalUnitsNeeded || 0);
+      if (!chemMap[key]) chemMap[key] = { name: p.ProductName, unit: p.Unit, totalUnits: 0, ratePerAc: 0, costPerUnit: parseFloat(p.CostPerUnit||0) };
+      chemMap[key].totalUnits += parseFloat(p.TotalUnitsNeeded || 0);
+      chemMap[key].ratePerAc  += parseFloat(p.RatePerAcre || 0);
     });
   });
 
   const chems = Object.values(chemMap);
-  if (!chems.length) {
-    document.getElementById('calcResults').innerHTML = '<div class="calc-empty">No chemicals found for selected orders</div>';
-    return;
+  if (!chems.length) { resultsEl.innerHTML = '<div class="calc-empty">No chemicals on selected orders</div>'; return; }
+
+  const perLoadRows = chems.map(c => {
+    const perLoad = loadsNeeded > 0 ? (c.totalUnits / loadsNeeded).toFixed(2) : '—';
+    const cost    = c.costPerUnit > 0 ? '$' + (c.totalUnits * c.costPerUnit).toFixed(2) : '';
+    return `<div class="calc-result-item">
+      <div class="calc-product-name">${c.name}</div>
+      <div class="calc-product-qty">${c.totalUnits.toFixed(1)} ${c.unit} total</div>
+      <div class="calc-product-detail">
+        <span>${perLoad} ${c.unit}/load</span>
+        <span>${cost}</span>
+      </div>
+    </div>`;
+  }).join('');
+
+  resultsEl.innerHTML = `
+    <div class="calc-summary-row">
+      <div class="calc-summary-item"><div class="calc-summary-val">${totalAcres.toFixed(1)}</div><div class="calc-summary-lbl">Total Acres</div></div>
+      <div class="calc-summary-item"><div class="calc-summary-val">${totalGallons.toFixed(0)}</div><div class="calc-summary-lbl">Total Gallons</div></div>
+      <div class="calc-summary-item accent"><div class="calc-summary-val">${loadsNeeded}</div><div class="calc-summary-lbl">Tank Loads</div></div>
+      <div class="calc-summary-item"><div class="calc-summary-val">${acresPerLoad}</div><div class="calc-summary-lbl">Ac/Load</div></div>
+    </div>
+    <div style="font-size:0.75rem;color:var(--text-sub);margin-bottom:0.75rem">${tankSize} gal tank · ${galPerAc} gal/ac spray rate</div>
+    ${perLoadRows}`;
+}
+
+// ── TAB 2: MIX CALC (no order needed) ────────────────────────────────────────
+function renderMixCalc() {
+  const tmplSel = document.getElementById('mixCalcTemplate');
+  if (tmplSel && tmplSel.options.length <= 1) {
+    DB.templates.filter(t => t.Active === 'Yes').forEach(t => {
+      const o = document.createElement('option');
+      o.value = t.TemplateID; o.textContent = t.TemplateName + ' (' + t.CropType + ')';
+      tmplSel.appendChild(o);
+    });
   }
+  runMixCalc();
+}
 
-  // Tank loads based on total gallons needed (assume ~15 gal/acre spray rate as default)
-  const sprayRate = 15;
-  const totalGallons = totalAcres * sprayRate;
-  const loadsNeeded = tankSize > 0 ? Math.ceil(totalGallons / tankSize) : '—';
+function runMixCalc() {
+  const resultsEl = document.getElementById('mixCalcResults');
+  if (!resultsEl) return;
+  const tmplId  = document.getElementById('mixCalcTemplate')?.value;
+  const galPerAc= parseFloat(document.getElementById('mixCalcGalPerAc')?.value || 15);
+  const totalGal= parseFloat(document.getElementById('mixCalcTotalGal')?.value || 0);
+  const tankSize = parseFloat(document.getElementById('mixCalcTankSize')?.value || 100);
 
-  document.getElementById('calcResults').innerHTML = `
-    <div style="margin-bottom:1rem;padding-bottom:1rem;border-bottom:1px solid var(--border)">
-      <div style="font-size:0.75rem;color:var(--text-sub);text-transform:uppercase;letter-spacing:0.08em">Total Acres Selected</div>
-      <div style="font-family:var(--font-head);font-size:2rem;color:var(--text)">${totalAcres.toLocaleString()} ac</div>
+  if (!tmplId) { resultsEl.innerHTML = '<div class="calc-empty">Select a mix template above</div>'; return; }
+  if (!totalGal && !tankSize) { resultsEl.innerHTML = '<div class="calc-empty">Enter total gallons or tank size</div>'; return; }
+
+  const prods = DB.templateProds.filter(p => p.TemplateID === tmplId);
+  if (!prods.length) { resultsEl.innerHTML = '<div class="calc-empty">No chemicals in this template</div>'; return; }
+
+  // Calculate from total gallons (or tank size if no total given)
+  const gallons  = totalGal || tankSize;
+  const acres    = galPerAc > 0 ? (gallons / galPerAc).toFixed(1) : '?';
+  const loads    = totalGal && tankSize > 0 ? Math.ceil(totalGal / tankSize) : 1;
+  const galPerLoad = loads > 0 ? (gallons / loads).toFixed(0) : gallons;
+
+  const rows = prods.map(p => {
+    const rate     = parseFloat(p.RatePerAcre || 0);
+    const totalAc  = galPerAc > 0 ? gallons / galPerAc : 0;
+    const totalAmt = (rate * totalAc).toFixed(2);
+    const perLoad  = loads > 0 ? (rate * totalAc / loads).toFixed(2) : totalAmt;
+    return `<div class="calc-result-item">
+      <div class="calc-product-name">${p.ProductName}</div>
+      <div class="calc-product-qty">${totalAmt} ${p.Unit} total</div>
+      <div class="calc-product-detail">
+        <span>${perLoad} ${p.Unit}/load · ${rate} ${p.Unit}/ac</span>
+        <span style="color:var(--text-sub)">${p.SuppliedBy === 'Customer' ? 'By customer' : ''}</span>
+      </div>
+    </div>`;
+  }).join('');
+
+  resultsEl.innerHTML = `
+    <div class="calc-summary-row">
+      <div class="calc-summary-item"><div class="calc-summary-val">${gallons.toFixed(0)}</div><div class="calc-summary-lbl">Total Gal</div></div>
+      <div class="calc-summary-item"><div class="calc-summary-val">${acres}</div><div class="calc-summary-lbl">Est. Acres</div></div>
+      <div class="calc-summary-item accent"><div class="calc-summary-val">${loads}</div><div class="calc-summary-lbl">Loads</div></div>
+      <div class="calc-summary-item"><div class="calc-summary-val">${galPerLoad}</div><div class="calc-summary-lbl">Gal/Load</div></div>
     </div>
-    ${chems.map(c => `
-      <div class="calc-result-item">
-        <div class="calc-product-name">${c.name}</div>
-        <div class="calc-product-qty">${c.total.toFixed(1)} ${c.unit}</div>
-        <div class="calc-product-detail">
-          <span>Total needed</span>
-          <span>${c.costPerUnit > 0 ? '$' + (c.total * c.costPerUnit).toFixed(2) + ' est.' : ''}</span>
-        </div>
-      </div>`).join('')}
-    <div class="calc-loads">
-      <div class="calc-loads-num">${loadsNeeded}</div>
-      <div class="calc-loads-label">tank loads (${tankSize} gal tank · ${sprayRate} gal/ac)</div>
-    </div>
-  `;
+    ${rows}`;
 }
 
 // ── REPORTS ──────────────────────────────────────────────────────────────────
@@ -1278,19 +1341,19 @@ function addChemicalLine(prefill) {
   div.innerHTML = `
     <div class="form-group" style="margin:0">
       <label class="form-label">Product</label>
-      <select class="form-input">${prodOptions}</select>
+      <select class="form-input chem-product">${prodOptions}</select>
     </div>
     <div class="form-group" style="margin:0">
       <label class="form-label">Rate/Ac</label>
-      <input class="form-input" type="number" step="0.01" value="${prefill?.RatePerAcre||''}" placeholder="0">
+      <input class="form-input chem-rate" type="number" step="0.01" value="${prefill?.RatePerAcre||''}" placeholder="0">
     </div>
     <div class="form-group" style="margin:0">
       <label class="form-label">Unit</label>
-      <input class="form-input" type="text" value="${prefill?.Unit||'fl oz'}" placeholder="fl oz">
+      <input class="form-input chem-unit" type="text" value="${prefill?.Unit||'fl oz'}" placeholder="fl oz">
     </div>
     <div class="form-group" style="margin:0">
       <label class="form-label">By</label>
-      <select class="form-input">
+      <select class="form-input chem-supplied">
         <option ${prefill?.SuppliedBy==='Me'?'selected':''}>Me</option>
         <option ${prefill?.SuppliedBy==='Customer'?'selected':''}>Customer</option>
       </select>
