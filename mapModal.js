@@ -14,10 +14,12 @@ window.MapModal = (() => {
   let drawPolyline   = null;
   let drawMode       = false;
   let onConfirmCb    = null;
+  let onCloseCb      = null;
 
   // ── OPEN ──────────────────────────────────────────────────────────────────
   async function open(opts = {}) {
     onConfirmCb    = opts.onConfirm || null;
+    onCloseCb      = opts.onClose   || null;
     selectedFields = [];
     drawPoints     = [];
     drawMode       = false;
@@ -28,10 +30,11 @@ window.MapModal = (() => {
     updateSelectedPanel();
     setStatus('Initializing map...');
 
-    // Defer Leaflet init until modal is painted
+    // Defer Leaflet init until modal is fully painted and laid out
     setTimeout(async () => {
       if (!map) initMap();
-      else      map.invalidateSize();
+      // Double invalidate — first after paint, second after layout fully settles
+      setTimeout(() => { if (map) map.invalidateSize(); }, 200);
 
       const defaultLat = 39.8, defaultLng = -89.6;
       let lat = opts.centerLat || defaultLat;
@@ -292,6 +295,7 @@ window.MapModal = (() => {
     document.getElementById('mapModal').classList.remove('active');
     document.getElementById('mapOverlay').classList.remove('active');
     if (drawMode) cancelDraw();
+    if (onCloseCb) { onCloseCb(); onCloseCb = null; }
   }
 
   // ── HELPERS ───────────────────────────────────────────────────────────────

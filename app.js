@@ -1013,20 +1013,23 @@ async function onMapFieldsConfirmed(mapFields, custId, custName) {
 }
 
 function openMapForField() {
-  // Open map from the field edit modal
   const custId   = document.getElementById('fFieldCustomer').value;
   const cust     = DB.customers.find(c => c.CustomerID === custId);
   const addr     = cust ? [cust.Address, cust.City, cust.State].filter(Boolean).join(', ') : '';
   const existLat = parseFloat(document.getElementById('fFieldLat').value) || null;
   const existLng = parseFloat(document.getElementById('fFieldLng').value) || null;
 
+  // Hide field modal while map is open, restore after
+  document.getElementById('fieldModal').style.display = 'none';
+
   MapModal.open({
     centerLat:       existLat,
     centerLng:       existLng,
     customerAddress: addr,
     onConfirm: (mapFields) => {
+      // Restore field modal
+      document.getElementById('fieldModal').style.display = '';
       if (!mapFields.length) return;
-      // Take first selected field — populate form fields
       const mf  = mapFields[0];
       const ctr = mf.centroid || GeoUtils.centroid(mf.points);
       if (ctr) {
@@ -1034,19 +1037,20 @@ function openMapForField() {
         document.getElementById('fFieldLng').value = ctr.lng.toFixed(6);
       }
       if (mf.acres) document.getElementById('fFieldAcres').value = mf.acres;
-      // Show polygon preview
       const preview = document.getElementById('fieldPolygonPreview');
       if (preview && mf.points) preview.innerHTML = GeoUtils.polygonToSVG(mf.points, { width: 240, height: 120 });
-      // Store KML in a hidden field
       let kmlHidden = document.getElementById('fFieldKML');
       if (!kmlHidden) {
         kmlHidden = document.createElement('input');
-        kmlHidden.type = 'hidden';
-        kmlHidden.id   = 'fFieldKML';
+        kmlHidden.type = 'hidden'; kmlHidden.id = 'fFieldKML';
         document.getElementById('fieldModal').appendChild(kmlHidden);
       }
       kmlHidden.value = mf.kml || '';
       showToast('Field boundary loaded from map', 'success');
+    },
+    onClose: () => {
+      // Restore field modal if map closed without confirming
+      document.getElementById('fieldModal').style.display = '';
     }
   });
 }

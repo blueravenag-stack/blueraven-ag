@@ -199,27 +199,45 @@ window.GeoUtils = (() => {
   // USDA FSA CLU WFS endpoint — returns field boundaries for a bounding box
 
   async function fetchCLU(bounds) {
-    // bounds: { minLat, minLng, maxLat, maxLng }
+    // USDA FSA Public CLU FeatureServer - current endpoint as of 2025
+    // Docs: https://arcgis.fsa.usda.gov/arcgis/rest/services/Hosted/PAIL_CLU_Public/FeatureServer/0
     const { minLat, minLng, maxLat, maxLng } = bounds;
     const bbox = `${minLng},${minLat},${maxLng},${maxLat}`;
-    const url = `https://gis.fsa.usda.gov/fpac-gnss-prod-arcgis/rest/services/CLU/GetCLU/FeatureServer/0/query?` +
-      `geometry=${encodeURIComponent(bbox)}` +
-      `&geometryType=esriGeometryEnvelope` +
-      `&spatialRel=esriSpatialRelIntersects` +
-      `&outFields=clu_number,farm_number,state_code,county_code,clu_calculated_acreage` +
-      `&returnGeometry=true` +
-      `&outSR=4326` +
-      `&f=geojson`;
+
+    const base = 'https://arcgis.fsa.usda.gov/arcgis/rest/services/Hosted/PAIL_CLU_Public/FeatureServer/0/query';
+    const params = new URLSearchParams({
+      geometry:           bbox,
+      geometryType:       'esriGeometryEnvelope',
+      spatialRel:         'esriSpatialRelIntersects',
+      outFields:          'clu_number,farm_number,tract_number,clu_calculated_acreage,admin_state,admin_county',
+      returnGeometry:     'true',
+      outSR:              '4326',
+      f:                  'geojson',
+      resultRecordCount:  '100',
+    });
+
     try {
-      const res  = await fetch(url);
+      const res  = await fetch(`${base}?${params}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
-      return (json.features || []).map(f => ({
-        id:      f.properties?.clu_number || '',
-        farmNum: f.properties?.farm_number || '',
-        acres:   parseFloat(f.properties?.clu_calculated_acreage || 0).toFixed(1),
-        points:  parseGeoJSON(JSON.stringify(f.geometry)),
-        props:   f.properties
-      })).filter(f => f.points && f.points.length >= 3);
+
+      if (json.error) {
+        console.warn('CLU API error:', json.error.message);
+        return [];
+      }
+
+      return (json.features || []).map(f => {
+        const p = f.properties || {};
+        return {
+          id:      String(p.clu_number || p.CLU_NUMBER || ''),
+          farmNum: String(p.farm_number || p.FARM_NUMBER || ''),
+          tractNum:String(p.tract_number || p.TRACT_NUMBER || ''),
+          acres:   parseFloat(p.clu_calculated_acreage || p.CLU_CALCULATED_ACREAGE || 0).toFixed(1),
+          points:  parseGeoJSON(JSON.stringify(f.geometry)),
+          props:   p
+        };
+      }).filter(f => f.points && f.points.length >= 3);
+
     } catch(e) {
       console.warn('CLU fetch failed:', e.message);
       return [];
