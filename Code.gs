@@ -1,4 +1,4 @@
-// BLUE RAVEN AG — Google Apps Script v1.5
+// BLUE RAVEN AG — Google Apps Script v1.6
 // Paste into script.google.com — deploy as Web App
 //   Execute as: Me
 //   Who has access: Anyone (anonymous)
@@ -14,23 +14,17 @@ const TABS = {
   templates:     'MixTemplates',
   templateProds: 'MixTemplateProducts',
   orderProds:    'OrderProducts',
+  fields:        'Fields',
+  orderFields:   'OrderFields',
 };
 
 // ── ALL REQUESTS GO THROUGH doGet ────────────────────────────────────────────
-// Writes use ?action=write&table=X&data=JSON
-// Reads  use ?action=read
-// This avoids all CORS/redirect issues with cross-origin POST requests
 function doGet(e) {
   try {
     const action = e.parameter.action || 'read';
-
-    if (action === 'read') {
-      return handleRead();
-    } else if (action === 'write') {
-      return handleWrite(e.parameter);
-    } else {
-      return jsonOut({ error: 'Unknown action: ' + action });
-    }
+    if (action === 'read')  return handleRead();
+    if (action === 'write') return handleWrite(e.parameter);
+    return jsonOut({ error: 'Unknown action: ' + action });
   } catch(err) {
     return jsonOut({ error: err.message });
   }
@@ -47,9 +41,8 @@ function handleRead() {
 }
 
 function handleWrite(params) {
-  const table  = params.table;
-  const raw    = params.data;
-  const data   = JSON.parse(decodeURIComponent(raw));
+  const table = params.table;
+  const data  = JSON.parse(decodeURIComponent(params.data));
 
   const ss      = SpreadsheetApp.openById(SHEET_ID);
   const tabName = TABS[table];
@@ -57,11 +50,9 @@ function handleWrite(params) {
   if (!sheet) return jsonOut({ error: 'Sheet not found: ' + tabName });
 
   const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  const idCol   = headers[0];
-  const idValue = String(data[idCol] || '');
-
-  // Find existing row
+  const idValue = String(data[headers[0]] || '');
   const lastRow = sheet.getLastRow();
+
   let rowIdx = -1;
   if (lastRow > 1) {
     const ids = sheet.getRange(2, 1, lastRow - 1, 1).getValues().flat().map(String);
@@ -80,11 +71,10 @@ function handleWrite(params) {
     return jsonOut({ success: true, action: 'updated', row: rowIdx + 2 });
   } else {
     sheet.appendRow(rowValues);
-    return jsonOut({ success: true, action: 'inserted', row: lastRow + 1 });
+    return jsonOut({ success: true, action: 'inserted' });
   }
 }
 
-// Keep doPost as fallback (not used by app but harmless)
 function doPost(e) {
   return jsonOut({ error: 'Use GET requests. See app.js writeRow().' });
 }

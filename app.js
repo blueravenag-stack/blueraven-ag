@@ -20,7 +20,8 @@ const GAS_URL = 'https://script.google.com/macros/s/AKfycby-9LUgvhXKSi0Cj-8NRext
 // ── STATE ───────────────────────────────────────────────────────────────────
 let DB = {
   orders: [], customers: [], pilots: [],
-  products: [], templates: [], templateProds: [], orderProds: []
+  products: [], templates: [], templateProds: [], orderProds: [],
+  fields: [], orderFields: []
 };
 let currentView = 'dashboard';
 let previousView = 'dashboard';
@@ -96,6 +97,7 @@ function renderView(view) {
     case 'orders':     renderOrdersList(); break;
     case 'customers':  renderCustomers(); break;
     case 'products':   renderProducts(); break;
+    case 'fields':     renderFields(); break;
     case 'calculator': renderCalculator(); break;
     case 'reports':    renderReports(); break;
   }
@@ -130,6 +132,8 @@ async function syncData() {
     DB.templates    = parseSheet(data.templates,     templateHeaders());
     DB.templateProds= parseSheet(data.templateProds, templateProdHeaders());
     DB.orderProds   = parseSheet(data.orderProds,    orderProdHeaders());
+    DB.fields       = parseSheet(data.fields,        fieldHeaders());
+    DB.orderFields  = parseSheet(data.orderFields,   orderFieldHeaders());
 
     saveToLocalStorage();
     status.className = 'sync-status ok';
@@ -155,13 +159,15 @@ function parseSheet(rows, headers) {
 }
 
 // Header definitions match sheet columns exactly
-function orderHeaders()       { return ['OrderID','OrderDate','CustomerID','CustomerName','FieldName','Acres','CropType','ScheduledDate','CompletedDate','PilotID','PilotName','Status','PricingType','RatePerAcre','EstimatedTotal','ChemicalCost','FieldLat','FieldLng','FieldPolygonKML','TemplateUsed','Invoiced','DJI_FlightFile','Attachments','Notes']; }
+function orderHeaders()       { return ['OrderID','OrderDate','CustomerID','CustomerName','CropType','PlantingDate','RelativeMaturity','ScheduledDate','CompletedDate','PilotID','PilotName','Status','PricingType','RatePerAcre','TotalAcres','EstimatedTotal','ChemicalCost','TemplateUsed','Invoiced','DJI_FlightFile','Attachments','Notes']; }
 function customerHeaders()    { return ['CustomerID','Name','Phone','Email','Address','City','State','Zip','Notes']; }
 function pilotHeaders()       { return ['PilotID','Name','Phone','Email','FAA_Part107_Num','Active']; }
 function productHeaders()     { return ['ProductID','ProductName','Manufacturer','Unit','CostPerUnit','REI_Hours','PHI_Days','Notes']; }
 function templateHeaders()    { return ['TemplateID','TemplateName','CropType','Description','Active']; }
 function templateProdHeaders(){ return ['LineID','TemplateID','ProductID','ProductName','RatePerAcre','Unit','SuppliedBy','Notes']; }
 function orderProdHeaders()   { return ['LineID','OrderID','ProductID','ProductName','RatePerAcre','Unit','SuppliedBy','CostPerUnit','Acres','TotalUnitsNeeded','TotalProductCost']; }
+function fieldHeaders()       { return ['FieldID','CustomerID','CustomerName','FieldName','Acres','CentroidLat','CentroidLng','PolygonKML','CLU_TractID','CLU_FarmNum','Active','Notes']; }
+function orderFieldHeaders()  { return ['LineID','OrderID','FieldID','FieldName','CustomerID','Acres','Notes']; }
 
 // ── LOCAL STORAGE ───────────────────────────────────────────────────────────
 function saveToLocalStorage() {
@@ -729,6 +735,249 @@ function switchTab(tab, el) {
   document.getElementById('tab-' + tab).classList.add('active');
 }
 
+
+// ── FIELDS ───────────────────────────────────────────────────────────────────
+let orderFieldsSelected = []; // fields staged in the order modal
+
+function renderFields() {
+  const search  = (document.getElementById('fieldSearch')?.value || '').toLowerCase();
+  const custFil = document.getElementById('filterFieldCustomer')?.value || '';
+  const actFil  = document.getElementById('filterFieldActive')?.value;
+
+  // Populate customer filter
+  const custSel = document.getElementById('filterFieldCustomer');
+  if (custSel && custSel.options.length <= 1) {
+    DB.customers.forEach(c => {
+      const o = document.createElement('option');
+      o.value = c.CustomerID; o.textContent = c.Name;
+      custSel.appendChild(o);
+    });
+  }
+
+  const filtered = DB.fields.filter(f => {
+    const matchSearch = !search || f.FieldName.toLowerCase().includes(search) || f.CustomerName.toLowerCase().includes(search);
+    const matchCust   = !custFil || f.CustomerID === custFil;
+    const matchActive = actFil === '' || f.Active === actFil;
+    return matchSearch && matchCust && matchActive;
+  }).sort((a, b) => a.CustomerName.localeCompare(b.CustomerName) || a.FieldName.localeCompare(b.FieldName));
+
+  const el = document.getElementById('fieldsList');
+  if (!el) return;
+  if (!filtered.length) { el.innerHTML = '<div class="empty-state">No fields found</div>'; return; }
+
+  // Group by customer
+  const grouped = {};
+  filtered.forEach(f => {
+    if (!grouped[f.CustomerName]) grouped[f.CustomerName] = [];
+    grouped[f.CustomerName].push(f);
+  });
+
+  el.innerHTML = Object.entries(grouped).map(([custName, fields]) => `
+    <div class="field-customer-group">
+      <div class="field-customer-header">${custName}</div>
+      ${fields.map(f => `
+        <div class="field-card" onclick="showEditFieldModal('${f.FieldID}')">
+          <div class="field-card-main">
+            <span class="field-card-name">${f.FieldName}</span>
+            ${f.Active === 'No' ? '<span class="badge badge-inactive">Inactive</span>' : ''}
+          </div>
+          <div class="field-card-meta">
+            ${f.Acres ? parseFloat(f.Acres).toFixed(1) + ' ac' : 'Acres TBD'}
+            ${f.CentroidLat ? ' · ' + parseFloat(f.CentroidLat).toFixed(4) + ', ' + parseFloat(f.CentroidLng).toFixed(4) : ''}
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `).join('');
+}
+
+function filterFields() { renderFields(); }
+
+function showNewFieldModal(presetCustomerId) {
+  document.getElementById('fieldModalTitle').textContent = 'New Field';
+  document.getElementById('editFieldId').value = '';
+  // fFieldName moved to Fields tab
+  document.getElementById('fFieldAcres').value = '';
+  document.getElementById('fFieldLat').value = '';
+  document.getElementById('fFieldLng').value = '';
+  document.getElementById('fFieldNotes').value = '';
+  document.getElementById('fFieldActive').value = 'Yes';
+  document.getElementById('btnDeleteField').style.display = 'none';
+
+  // Populate customer dropdown
+  const sel = document.getElementById('fFieldCustomer');
+  sel.innerHTML = '<option value="">— Select customer —</option>';
+  DB.customers.forEach(c => {
+    const o = document.createElement('option');
+    o.value = c.CustomerID; o.textContent = c.Name;
+    if (c.CustomerID === presetCustomerId) o.selected = true;
+    sel.appendChild(o);
+  });
+
+  openModal('fieldModal');
+}
+
+function showEditFieldModal(fieldId) {
+  const f = DB.fields.find(x => x.FieldID === fieldId);
+  if (!f) return;
+  document.getElementById('fieldModalTitle').textContent = 'Edit Field';
+  document.getElementById('editFieldId').value = f.FieldID;
+  document.getElementById('fFieldName').value = f.FieldName;
+  document.getElementById('fFieldAcres').value = f.Acres;
+  document.getElementById('fFieldLat').value = f.CentroidLat;
+  document.getElementById('fFieldLng').value = f.CentroidLng;
+  document.getElementById('fFieldNotes').value = f.Notes;
+  document.getElementById('fFieldActive').value = f.Active || 'Yes';
+  document.getElementById('btnDeleteField').style.display = 'inline-flex';
+
+  const sel = document.getElementById('fFieldCustomer');
+  sel.innerHTML = '';
+  DB.customers.forEach(c => {
+    const o = document.createElement('option');
+    o.value = c.CustomerID; o.textContent = c.Name;
+    if (c.CustomerID === f.CustomerID) o.selected = true;
+    sel.appendChild(o);
+  });
+
+  openModal('fieldModal');
+}
+
+async function saveField() {
+  const custId   = document.getElementById('fFieldCustomer').value;
+  const custName = document.getElementById('fFieldCustomer').selectedOptions[0]?.text || '';
+  const name     = document.getElementById('fFieldName').value.trim();
+  const editId   = document.getElementById('editFieldId').value;
+
+  if (!custId) { showToast('Please select a customer', 'error'); return; }
+  if (!name)   { showToast('Field name is required', 'error'); return; }
+
+  const fieldId = editId || 'FLD-' + String(DB.fields.length + 1).padStart(3, '0');
+  const field = {
+    FieldID: fieldId, CustomerID: custId, CustomerName: custName,
+    FieldName: name,
+    Acres: document.getElementById('fFieldAcres').value || '',
+    CentroidLat: document.getElementById('fFieldLat').value || '',
+    CentroidLng: document.getElementById('fFieldLng').value || '',
+    PolygonKML: editId ? (DB.fields.find(f => f.FieldID === editId)?.PolygonKML || '') : '',
+    CLU_TractID: '', CLU_FarmNum: '',
+    Active: document.getElementById('fFieldActive').value,
+    Notes: document.getElementById('fFieldNotes').value
+  };
+
+  const idx = DB.fields.findIndex(f => f.FieldID === fieldId);
+  if (idx > -1) DB.fields[idx] = field; else DB.fields.push(field);
+  await writeRow('fields', field);
+  saveToLocalStorage();
+  closeModal();
+  renderFields();
+  showToast(editId ? 'Field updated' : 'Field created', 'success');
+
+  // If field picker is open, refresh it
+  if (document.getElementById('fieldPickerModal')?.classList.contains('active')) {
+    const custFilter = document.getElementById('fCustomer')?.value;
+    renderFieldPicker(custFilter);
+  }
+}
+
+async function deleteField() {
+  const fieldId = document.getElementById('editFieldId').value;
+  const inUse   = DB.orderFields.some(f => f.FieldID === fieldId);
+  if (inUse) { showToast('Field is used in orders — set Inactive instead', 'error'); return; }
+  if (!confirm('Delete this field permanently?')) return;
+  DB.fields = DB.fields.filter(f => f.FieldID !== fieldId);
+  await writeRow('fields', { FieldID: fieldId, _delete: true });
+  saveToLocalStorage();
+  closeModal();
+  renderFields();
+  showToast('Field deleted', 'success');
+}
+
+// ── FIELD PICKER (in order modal) ────────────────────────────────────────────
+function loadCustomerFields() {
+  // Reset field selection when customer changes
+  orderFieldsSelected = [];
+  renderOrderFieldsList();
+}
+
+function showFieldPicker() {
+  const custId = document.getElementById('fCustomer').value;
+  if (!custId) { showToast('Select a customer first', 'error'); return; }
+  const custName = document.getElementById('fCustomer').selectedOptions[0]?.text || '';
+  document.getElementById('fieldPickerCustomerName').textContent = custName + ' — select one or more fields';
+  renderFieldPicker(custId);
+  document.getElementById('modalOverlay').classList.add('active');
+  document.getElementById('fieldPickerModal').classList.add('active');
+}
+
+function renderFieldPicker(custId) {
+  const fields = DB.fields.filter(f => f.CustomerID === custId && f.Active !== 'No');
+  const alreadySelected = new Set(orderFieldsSelected.map(f => f.FieldID));
+  const el = document.getElementById('fieldPickerList');
+  if (!fields.length) {
+    el.innerHTML = '<div class="empty-state">No fields for this customer yet</div>';
+    return;
+  }
+  el.innerHTML = fields.map(f => `
+    <label class="field-picker-item ${alreadySelected.has(f.FieldID) ? 'already-added' : ''}">
+      <input type="checkbox" value="${f.FieldID}" ${alreadySelected.has(f.FieldID) ? 'checked disabled' : ''}>
+      <div class="field-picker-info">
+        <span class="field-picker-name">${f.FieldName}</span>
+        <span class="field-picker-acres">${f.Acres ? parseFloat(f.Acres).toFixed(1) + ' ac' : 'Acres TBD'}</span>
+      </div>
+    </label>
+  `).join('');
+}
+
+function confirmFieldSelection() {
+  const custId = document.getElementById('fCustomer').value;
+  const checked = document.querySelectorAll('#fieldPickerList input[type=checkbox]:checked:not(:disabled)');
+  checked.forEach(cb => {
+    const field = DB.fields.find(f => f.FieldID === cb.value);
+    if (field && !orderFieldsSelected.find(f => f.FieldID === field.FieldID)) {
+      orderFieldsSelected.push(field);
+    }
+  });
+  closeFieldPicker();
+  renderOrderFieldsList();
+}
+
+function closeFieldPicker() {
+  document.getElementById('fieldPickerModal').classList.remove('active');
+  document.getElementById('modalOverlay').classList.remove('active');
+}
+
+function removeOrderField(fieldId) {
+  orderFieldsSelected = orderFieldsSelected.filter(f => f.FieldID !== fieldId);
+  renderOrderFieldsList();
+}
+
+function renderOrderFieldsList() {
+  const el   = document.getElementById('orderFieldsList');
+  const sumEl = document.getElementById('orderFieldsSummary');
+  const acEl  = document.getElementById('orderFieldsAcres');
+  if (!el) return;
+
+  if (!orderFieldsSelected.length) {
+    el.innerHTML = '<div class="empty-state" style="padding:0.5rem 0;font-size:0.8rem">No fields selected</div>';
+    sumEl.style.display = 'none';
+    return;
+  }
+
+  const total = orderFieldsSelected.reduce((s, f) => s + parseFloat(f.Acres || 0), 0);
+  el.innerHTML = orderFieldsSelected.map(f => `
+    <div class="order-field-chip">
+      <span class="order-field-chip-name">${f.FieldName}</span>
+      <span class="order-field-chip-acres">${f.Acres ? parseFloat(f.Acres).toFixed(1) + ' ac' : '—'}</span>
+      <button class="order-field-chip-remove" onclick="removeOrderField('${f.FieldID}')">×</button>
+    </div>
+  `).join('');
+  sumEl.style.display = 'block';
+  acEl.textContent = total.toFixed(1) + ' ac total';
+
+  // Update chem line acres
+  document.querySelectorAll('.chem-acres').forEach(el => el.textContent = total.toFixed(1));
+}
+
 // ── BATCH CALCULATOR ─────────────────────────────────────────────────────────
 function renderCalculator() {
   const eligible = DB.orders.filter(o => {
@@ -977,100 +1226,107 @@ function applyTemplate() {
 }
 
 async function saveOrder() {
-  const customerId = document.getElementById('fCustomer').value;
-  const fieldName  = document.getElementById('fFieldName').value.trim();
-  const acres      = document.getElementById('fAcres').value;
+  const custId  = document.getElementById('fCustomer').value;
+  const custName = document.getElementById('fCustomer').selectedOptions[0]?.text || '';
+  const editId  = document.getElementById('editOrderId').value;
+  const orderId = editId || 'ORD-' + String(DB.orders.length + 1).padStart(3, '0');
 
-  if (!customerId || !fieldName || !acres) {
-    showToast('Customer, field name, and acres are required', 'error');
-    return;
-  }
+  if (!custId) { showToast('Please select a customer', 'error'); return; }
+  if (orderFieldsSelected.length === 0) { showToast('Please add at least one field', 'error'); return; }
 
-  const customer = DB.customers.find(c => c.CustomerID === customerId);
-  const pilotId  = document.getElementById('fPilot').value;
-  const pilot    = DB.pilots.find(p => p.PilotID === pilotId);
-  const editId   = document.getElementById('editOrderId').value;
-  const rate     = parseFloat(document.getElementById('fRatePerAcre').value || 0);
+  const totalAcres = orderFieldsSelected.reduce((s, f) => s + parseFloat(f.Acres || 0), 0);
+  const ratePerAcre = parseFloat(document.getElementById('fRatePerAcre').value) || 0;
+  const pricingType = document.getElementById('fPricingType').value;
 
-  // Gather chemical lines
-  const lines = [...document.getElementById('chemicalLines').querySelectorAll('.chem-line')].map(line => {
-    const selects = line.querySelectorAll('select');
-    const inputs  = line.querySelectorAll('input');
-    const prodId  = selects[0].value;
-    const prod    = DB.products.find(p => p.ProductID === prodId);
-    const rate_   = parseFloat(inputs[0].value || 0);
-    const unit    = inputs[1].value;
-    const supBy   = selects[1].value;
-    const cost    = parseFloat(prod?.CostPerUnit || 0);
-    const totalUnits = rate_ * parseFloat(acres);
-    return {
-      ProductID: prodId,
-      ProductName: prod?.ProductName || '',
-      RatePerAcre: rate_,
-      Unit: unit,
-      SuppliedBy: supBy,
-      CostPerUnit: cost,
-      Acres: parseFloat(acres),
-      TotalUnitsNeeded: totalUnits,
-      TotalProductCost: totalUnits * cost
-    };
-  });
-
-  const chemCost = lines.filter(l => l.SuppliedBy === 'Me').reduce((s, l) => s + l.TotalProductCost, 0);
-
-  const order = {
-    OrderID:          editId || nextId('ORD', DB.orders.map(o => o.OrderID)),
-    OrderDate:        new Date().toISOString().split('T')[0],
-    CustomerID:       customerId,
-    CustomerName:     customer?.Name || '',
-    FieldName:        fieldName,
-    Acres:            parseFloat(acres),
-    CropType:         document.getElementById('fCropType').value,
-    ScheduledDate:    document.getElementById('fScheduledDate').value,
-    CompletedDate:    '',
-    PilotID:          pilotId,
-    PilotName:        pilot?.Name || '',
-    Status:           document.getElementById('fStatus').value,
-    PricingType:      document.getElementById('fPricingType').value,
-    RatePerAcre:      rate,
-    EstimatedTotal:   rate * parseFloat(acres),
-    ChemicalCost:     chemCost,
-    FieldLat:         document.getElementById('fLat').value,
-    FieldLng:         document.getElementById('fLng').value,
-    FieldPolygonKML:  document.getElementById('fPolygon').value,
-    TemplateUsed:     document.getElementById('fTemplate').value,
-    Invoiced:         document.getElementById('fInvoiced').value,
-    DJI_FlightFile:   '',
-    Attachments:      document.getElementById('fAttachments').value,
-    Notes:            document.getElementById('fNotes').value,
-  };
-
-  if (editId) {
-    const idx = DB.orders.findIndex(o => o.OrderID === editId);
-    if (idx > -1) DB.orders[idx] = order;
-    // Remove old product lines
-    DB.orderProds = DB.orderProds.filter(p => p.OrderID !== editId);
-  } else {
-    DB.orders.unshift(order);
-  }
-
-  // Add new product lines
-  lines.forEach((l, i) => {
-    DB.orderProds.push({
-      LineID: nextId('OPL', DB.orderProds.map(p => p.LineID)) + i,
-      OrderID: order.OrderID,
-      ...l
+  // Collect chemical lines
+  const lines = [];
+  let chemCost = 0;
+  document.querySelectorAll('.chem-line').forEach((row, i) => {
+    const prodSel  = row.querySelector('.chem-product');
+    const rateFld  = row.querySelector('.chem-rate');
+    const unitFld  = row.querySelector('.chem-unit');
+    const suppFld  = row.querySelector('.chem-supplied');
+    if (!prodSel || !prodSel.value) return;
+    const prod = DB.products.find(p => p.ProductID === prodSel.value) || {};
+    const rate = parseFloat(rateFld?.value) || 0;
+    const cost = parseFloat(prod.CostPerUnit || 0);
+    const totalUnits = rate * totalAcres;
+    const lineCost   = totalUnits * cost;
+    chemCost += lineCost;
+    lines.push({
+      LineID: (editId ? DB.orderProds.find(l => l.OrderID === editId && l.ProductID === prodSel.value)?.LineID : null) || `OPL-${Date.now()}-${i}`,
+      OrderID: orderId, ProductID: prodSel.value,
+      ProductName: prod.ProductName || prodSel.value,
+      RatePerAcre: rate, Unit: unitFld?.value || prod.Unit || '',
+      SuppliedBy: suppFld?.value || 'Me',
+      CostPerUnit: cost, Acres: totalAcres,
+      TotalUnitsNeeded: totalUnits, TotalProductCost: lineCost
     });
   });
 
-  saveToLocalStorage();
-  closeModal();
-  showToast(editId ? 'Order updated' : 'Order created', 'success');
+  const estTotal = pricingType === 'Flat Rate + Chemical'
+    ? ratePerAcre * totalAcres + chemCost
+    : ratePerAcre * totalAcres;
 
-  // Write to sheet
+  const order = {
+    OrderID: orderId,
+    OrderDate: editId ? (DB.orders.find(o => o.OrderID === editId)?.OrderDate || new Date().toISOString().split('T')[0]) : new Date().toISOString().split('T')[0],
+    CustomerID: custId,
+    CustomerName: custName,
+    CropType: document.getElementById('fCropType').value,
+    PlantingDate: document.getElementById('fPlantingDate').value,
+    RelativeMaturity: document.getElementById('fRelativeMaturity').value,
+    ScheduledDate: document.getElementById('fScheduledDate').value,
+    CompletedDate: editId ? (DB.orders.find(o => o.OrderID === editId)?.CompletedDate || '') : '',
+    PilotID: document.getElementById('fPilot').value,
+    PilotName: document.getElementById('fPilot').selectedOptions[0]?.text || '',
+    Status: document.getElementById('fStatus').value,
+    PricingType: pricingType,
+    RatePerAcre: ratePerAcre,
+    TotalAcres: totalAcres,
+    EstimatedTotal: estTotal,
+    ChemicalCost: chemCost,
+    TemplateUsed: document.getElementById('fTemplate').value,
+    Invoiced: document.getElementById('fInvoiced').value,
+    DJI_FlightFile: '',
+    Attachments: document.getElementById('fAttachments').value,
+    Notes: document.getElementById('fNotes').value
+  };
+
+  // Upsert order
+  const existIdx = DB.orders.findIndex(o => o.OrderID === orderId);
+  if (existIdx > -1) DB.orders[existIdx] = order; else DB.orders.push(order);
   await writeRow('orders', order);
 
+  // Save orderFields lines
+  if (editId) {
+    // Remove old orderFields for this order
+    const old = DB.orderFields.filter(f => f.OrderID === orderId);
+    for (const f of old) await writeRow('orderFields', { LineID: f.LineID, _delete: true });
+    DB.orderFields = DB.orderFields.filter(f => f.OrderID !== orderId);
+  }
+  for (let i = 0; i < orderFieldsSelected.length; i++) {
+    const f = orderFieldsSelected[i];
+    const line = { LineID: `OFL-${orderId}-${i}`, OrderID: orderId, FieldID: f.FieldID, FieldName: f.FieldName, CustomerID: custId, Acres: f.Acres, Notes: '' };
+    DB.orderFields.push(line);
+    await writeRow('orderFields', line);
+  }
+
+  // Save/delete chemical lines
+  if (editId) {
+    const oldProds = DB.orderProds.filter(p => p.OrderID === orderId);
+    for (const p of oldProds) await writeRow('orderProds', { LineID: p.LineID, _delete: true });
+    DB.orderProds = DB.orderProds.filter(p => p.OrderID !== orderId);
+  }
+  for (const line of lines) {
+    DB.orderProds.push(line);
+    await writeRow('orderProds', line);
+  }
+
+  saveToLocalStorage();
+  closeModal();
   renderView(currentView);
+  showToast(editId ? 'Order updated' : 'Order created', 'success');
 }
 
 // ── WRITE TO SHEET ───────────────────────────────────────────────────────────

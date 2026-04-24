@@ -65,6 +65,10 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
       Customers
     </a></li>
+    <li><a href="#" class="nav-link" data-view="fields">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-4 0v2M12 12v4M10 14h4"/></svg>
+      Fields
+    </a></li>
     <li><a href="#" class="nav-link" data-view="products">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3h18v4H3zM3 10h18v4H3zM3 17h18v4H3z"/></svg>
       Products & Mixes
@@ -213,6 +217,24 @@
   </div>
 
   <!-- ── BATCH CALCULATOR ── -->
+  <div class="view" id="view-fields">
+    <div class="view-header">
+      <h1 class="view-title">Fields</h1>
+      <button class="btn-primary" onclick="showNewFieldModal()">+ New Field</button>
+    </div>
+    <div class="filter-bar">
+      <input class="filter-input" type="text" id="fieldSearch" placeholder="Search fields or customers..." oninput="filterFields()">
+      <select class="filter-select" id="filterFieldCustomer" onchange="filterFields()">
+        <option value="">All Customers</option>
+      </select>
+      <select class="filter-select" id="filterFieldActive" onchange="filterFields()">
+        <option value="Yes">Active</option>
+        <option value="">All</option>
+      </select>
+    </div>
+    <div id="fieldsList" class="field-list"></div>
+  </div>
+
   <div class="view" id="view-calculator">
     <div class="view-header">
       <h1 class="view-title">Batch Calculator</h1>
@@ -273,14 +295,8 @@
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">Customer *</label>
-          <select class="form-input" id="fCustomer"></select>
+          <select class="form-input" id="fCustomer" onchange="loadCustomerFields()"></select>
         </div>
-        <div class="form-group">
-          <label class="form-label">Field Name *</label>
-          <input class="form-input" type="text" id="fFieldName" placeholder="e.g. North 80">
-        </div>
-      </div>
-      <div class="form-row">
         <div class="form-group">
           <label class="form-label">Crop Type</label>
           <select class="form-input" id="fCropType">
@@ -288,9 +304,15 @@
             <option>Sorghum</option><option>Cotton</option><option>Other</option>
           </select>
         </div>
+      </div>
+      <div class="form-row">
         <div class="form-group">
-          <label class="form-label">Acres *</label>
-          <input class="form-input" type="number" id="fAcres" placeholder="0">
+          <label class="form-label">Planting Date</label>
+          <input class="form-input" type="date" id="fPlantingDate">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Relative Maturity (RM)</label>
+          <input class="form-input" type="number" id="fRelativeMaturity" placeholder="e.g. 108">
         </div>
       </div>
       <div class="form-row">
@@ -312,21 +334,12 @@
     </div>
 
     <div class="form-section">
-      <div class="form-section-title">Field Location</div>
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Latitude</label>
-          <input class="form-input" type="number" step="any" id="fLat" placeholder="41.1234">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Longitude</label>
-          <input class="form-input" type="number" step="any" id="fLng" placeholder="-98.5678">
-        </div>
+      <div class="form-section-title">Fields</div>
+      <div id="orderFieldsList" class="order-fields-list"></div>
+      <div class="order-fields-summary" id="orderFieldsSummary" style="display:none">
+        Total: <strong id="orderFieldsAcres">0 ac</strong>
       </div>
-      <div class="form-group">
-        <label class="form-label">Field Boundary (KML/polygon data)</label>
-        <textarea class="form-input" id="fPolygon" rows="2" placeholder="Paste KML or polygon coordinates here"></textarea>
-      </div>
+      <button class="btn-ghost" onclick="showFieldPicker()">+ Add Fields</button>
     </div>
 
     <div class="form-section">
@@ -569,6 +582,59 @@
 </div>
 
 <!-- Toast -->
+
+<div class="modal" id="fieldPickerModal">
+  <div class="modal-header">
+    <h2 class="modal-title">Select Fields</h2>
+    <button class="modal-close" onclick="closeFieldPicker()">×</button>
+  </div>
+  <div class="modal-body">
+    <p class="panel-sub" id="fieldPickerCustomerName" style="margin-bottom:0.75rem"></p>
+    <div id="fieldPickerList" class="field-picker-list"></div>
+    <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border)">
+      <button class="btn-ghost" onclick="showNewFieldModal()">+ Create New Field</button>
+    </div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn-ghost" onclick="closeFieldPicker()">Cancel</button>
+    <button class="btn-primary" onclick="confirmFieldSelection()">Add Selected</button>
+  </div>
+</div>
+
+<div class="modal" id="fieldModal">
+  <div class="modal-header">
+    <h2 class="modal-title" id="fieldModalTitle">New Field</h2>
+    <button class="modal-close" onclick="closeModal()">×</button>
+  </div>
+  <div class="modal-body">
+    <input type="hidden" id="editFieldId">
+    <div class="form-section">
+      <div class="form-section-title">Field Info</div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Customer *</label><select class="form-input" id="fFieldCustomer"></select></div>
+        <div class="form-group"><label class="form-label">Field Name *</label><input class="form-input" type="text" id="fFieldName" placeholder="e.g. North 80"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Acres</label><input class="form-input" type="number" step="0.1" id="fFieldAcres" placeholder="0.0"></div>
+        <div class="form-group"><label class="form-label">Active</label><select class="form-input" id="fFieldActive"><option value="Yes">Active</option><option value="No">Inactive</option></select></div>
+      </div>
+    </div>
+    <div class="form-section">
+      <div class="form-section-title">Location</div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Centroid Lat</label><input class="form-input" type="number" step="any" id="fFieldLat" placeholder="41.1234"></div>
+        <div class="form-group"><label class="form-label">Centroid Lng</label><input class="form-input" type="number" step="any" id="fFieldLng" placeholder="-89.5678"></div>
+      </div>
+      <div class="form-group"><label class="form-label">Notes</label><textarea class="form-input" id="fFieldNotes" rows="2" placeholder="Field notes, landmarks..."></textarea></div>
+    </div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn-danger-ghost" id="btnDeleteField" onclick="deleteField()" style="display:none;margin-right:auto">Delete</button>
+    <button class="btn-ghost" onclick="closeModal()">Cancel</button>
+    <button class="btn-primary" onclick="saveField()">Save Field</button>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script src="app.js"></script>
