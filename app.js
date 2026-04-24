@@ -167,13 +167,19 @@ async function syncData() {
   renderView(currentView);
 }
 
-function parseSheet(rows, headers) {
+function parseSheet(rows, expectedHeaders) {
   if (!rows || rows.length < 2) return [];
+  // Use ACTUAL sheet header row for column mapping — never assume position
+  const actualHeaders = rows[0].map(h => String(h).trim());
+  const idCol = actualHeaders[0] || expectedHeaders[0];
   return rows.slice(1).map(row => {
     const obj = {};
-    headers.forEach((h, i) => { obj[h] = row[i] || ''; });
+    // Map by actual sheet column name
+    actualHeaders.forEach((h, i) => { if (h) obj[h] = row[i] !== undefined ? String(row[i]) : ''; });
+    // Also fill any expected headers that are missing from sheet (default empty)
+    expectedHeaders.forEach(h => { if (!(h in obj)) obj[h] = ''; });
     return obj;
-  }).filter(r => r[headers[0]]);
+  }).filter(r => r[idCol]);
 }
 
 // Header definitions match sheet columns exactly
@@ -1011,10 +1017,25 @@ function openMapForOrder() {
     }
   }
 
+  // Build preselected list with points decoded from stored KML
+  const preselected = orderFieldsSelected.map(f => {
+    const field = DB.fields.find(x => x.FieldID === f.FieldID) || f;
+    const points = field.PolygonKML ? GeoUtils.parsePolygon(field.PolygonKML) : null;
+    return {
+      id:        field.FieldID,
+      fieldName: field.FieldName,
+      acres:     field.Acres || '0',
+      points,
+      kml:       field.PolygonKML || '',
+      fromDB:    true,
+    };
+  }).filter(f => f.points && f.points.length >= 3);
+
   MapModal.open({
     centerLat,
     centerLng,
     customerAddress: addr,
+    preselected,
     onConfirm: async (mapFields) => {
       // Prompt for name on drawn/pasted fields before saving
       for (const mf of mapFields) {
@@ -1436,56 +1457,96 @@ function renderGDUCard(r) {
     </div>`;
   }
 
-  const urgency  = GDUCalc.urgencyClass(r);
-  const barWidth = Math.min(100, r.pctToVT) + '%';
-  const targetPct= Math.min(100, r.windowStartGDU / r.vtGDU * 100) + '%';
+  const urgency    = GDUCalc.urgencyClass(r);
+  const barWidth   = Math.min(100, r.pctToVT) + '%';
+  // Mark window start (VT onset, 80%) and end (R1/R2, 105%) on bar
+  const winStartPct = Math.min(100, r.windowStartGDU / r.vtGDU * 100) + '%';
+  const winEndPct   = Math.min(100, r.windowEndGDU   / r.vtGDU * 100) + '%';
+  const vtPct       = '100%';
 
-  const statusMsg = r.pctToVT >= 100
-    ? (r.pctToVT >= 110 ? '⚠ Past optimal window' : '✅ In application window now')
+  // Find the order for this result to get scheduled date
+  const order = DB.orders.find(o => o.OrderID === r.orderId);
+  const scheduledDate = order?.ScheduledDate || '';
+  const scheduledDisp = scheduledDate ? GDUCalc.fmtDate(scheduledDate) : 'Not set';
+
+  const statusMsg = r.pctToVT >= 105
+    ? '⚠ Past R1 — fungicide window closing'
+    : r.pctToVT >= 100
+    ? '✅ At VT — ideal window open now'
+    : r.pctToVT >= 80
+    ? '⚡ Approaching VT — apply soon'
     : r.targetProjected
-    ? `Est. target date: <strong>${GDUCalc.fmtDate(r.targetDate)}</strong>`
-    : `On track — target GDU by <strong>${GDUCalc.fmtDate(r.targetDate)}</strong>`;
+    ? `Projected application: <strong>${GDUCalc.fmtDate(r.targetDate)}</strong>`
+    : `Target date: <strong>${GDUCalc.fmtDate(r.targetDate)}</strong>`;
+
+  const schedMatchesTarget = scheduledDate === r.targetDate;
 
   return `<div class="gdu-card ${urgency}">
     <div class="gdu-card-header">
       <div>
         <div class="gdu-card-title">${r.customerName} — ${r.fieldNames}</div>
-        <div class="gdu-card-sub">RM ${r.rm} · Planted ${GDUCalc.fmtDate(r.plantDate)} · ${r.stage}</div>
+        <div class="gdu-card-sub">${r.orderId} · RM ${r.rm} · Planted ${GDUCalc.fmtDate(r.plantDate)} · ${r.stage}</div>
       </div>
       <div class="gdu-card-gdu">
         <div class="gdu-val">${r.currentGDU}</div>
-        <div class="gdu-lbl">GDU</div>
+        <div class="gdu-lbl">GDU today</div>
       </div>
     </div>
 
     <div class="gdu-progress-wrap">
       <div class="gdu-progress-bar">
         <div class="gdu-progress-fill" style="width:${barWidth}"></div>
-        <div class="gdu-progress-target" style="left:${targetPct}" title="Fungicide window start"></div>
+        <!-- VT-R1 window band -->
+        <div class="gdu-window-band" style="left:${winStartPct};width:${Math.min(100,r.windowEndGDU/r.vtGDU*100) - Math.min(100,r.windowStartGDU/r.vtGDU*100)}%" title="VT–R1 fungicide window"></div>
+        <!-- VT marker -->
+        <div class="gdu-progress-vt" style="left:${vtPct}" title="VT tasseling"></div>
       </div>
       <div class="gdu-progress-labels">
-        <span>0</span>
+        <span>Planting</span>
+        <span style="color:var(--warn)">▼ Window</span>
         <span>VT (${r.vtGDU} GDU)</span>
       </div>
     </div>
 
     <div class="gdu-window-row">
       <div class="gdu-window-item">
-        <span class="gdu-window-lbl">Window opens</span>
-        <span class="gdu-window-val">${GDUCalc.fmtDate(r.windowStart)} (${r.windowStartGDU} GDU)</span>
+        <span class="gdu-window-lbl">Window opens (VT)</span>
+        <span class="gdu-window-val">${GDUCalc.fmtDate(r.windowStart)}</span>
       </div>
       <div class="gdu-window-item target">
-        <span class="gdu-window-lbl">🎯 Ideal application</span>
-        <span class="gdu-window-val">${GDUCalc.fmtDate(r.targetDate)} (${r.targetGDU} GDU)</span>
+        <span class="gdu-window-lbl">🎯 Peak (VT-R1)</span>
+        <span class="gdu-window-val">${GDUCalc.fmtDate(r.targetDate)}${r.targetProjected ? ' *' : ''}</span>
       </div>
       <div class="gdu-window-item">
-        <span class="gdu-window-lbl">Window closes</span>
+        <span class="gdu-window-lbl">Window closes (R1)</span>
         <span class="gdu-window-val">${GDUCalc.fmtDate(r.windowEnd)}</span>
       </div>
     </div>
 
-    <div class="gdu-status ${urgency}">${statusMsg}${r.targetProjected ? ' <span style="color:var(--text-sub);font-size:0.78rem">(projected)</span>' : ''}</div>
+    <div class="gdu-scheduled-row">
+      <div>
+        <span class="gdu-window-lbl">Scheduled date</span>
+        <span class="gdu-scheduled-val ${scheduledDate ? '' : 'unset'}">${scheduledDisp}</span>
+      </div>
+      ${!schedMatchesTarget && r.targetDate ? `
+        <button class="btn-secondary gdu-set-btn" onclick="setGDUScheduledDate('${r.orderId}', '${r.targetDate}')">
+          Set to ${GDUCalc.fmtDate(r.targetDate)}
+        </button>` : schedMatchesTarget ? '<span style="color:var(--accent2);font-size:0.8rem">✓ Matches target</span>' : ''}
+    </div>
+
+    <div class="gdu-status ${urgency}">${statusMsg}${r.targetProjected ? ' <span style="color:var(--text-sub);font-size:0.78rem">(*projected beyond 14-day forecast)</span>' : ''}</div>
   </div>`;
+}
+
+async function setGDUScheduledDate(orderId, date) {
+  const o = DB.orders.find(x => x.OrderID === orderId);
+  if (!o) return;
+  o.ScheduledDate = date;
+  await writeRow('orders', o);
+  saveToLocalStorage();
+  showToast(`Scheduled date set to ${GDUCalc.fmtDate(date)} for ${orderId}`, 'success');
+  // Re-render GDU cards to show updated scheduled date
+  renderGDU();
 }
 
 async function runGDUAnalysis() {

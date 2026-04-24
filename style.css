@@ -758,3 +758,26 @@ body.light .leaflet-container { background: #e8e8e8; }
 .gdu-status.tracking { color:var(--accent2); }
 .gdu-status.soon     { color:var(--warn); }
 .gdu-status.urgent   { color:var(--danger); font-weight:600; }
+
+/* ── GDU card additions ── */
+.gdu-window-band {
+  position: absolute; top: 0; height: 100%;
+  background: rgba(255,183,77,0.35);
+  border-left: 2px solid var(--warn);
+  border-right: 2px solid var(--danger);
+  pointer-events: none;
+}
+.gdu-progress-vt {
+  position: absolute; top: -4px; width: 2px; height: 18px;
+  background: var(--danger); transform: translateX(-50%);
+  pointer-events: none;
+}
+.gdu-scheduled-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 0.75rem; padding: 0.5rem 0.6rem;
+  background: var(--bg3); border-radius: var(--radius);
+  margin: 0.5rem 0; flex-wrap: wrap;
+}
+.gdu-scheduled-val { font-weight: 500; font-size: 0.85rem; color: var(--text); margin-left: 0.4rem; }
+.gdu-scheduled-val.unset { color: var(--text-sub); font-style: italic; }
+.gdu-set-btn { font-size: 0.78rem; padding: 0.3rem 0.6rem; white-space: nowrap; }

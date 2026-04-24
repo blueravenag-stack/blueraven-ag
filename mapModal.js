@@ -38,7 +38,6 @@ window.MapModal = (() => {
     // Defer Leaflet init until modal is fully painted and laid out
     setTimeout(async () => {
       if (!map) initMap();
-      // Double invalidate — first after paint, second after layout fully settles
       setTimeout(() => { if (map) map.invalidateSize(); }, 200);
 
       const defaultLat = 39.8, defaultLng = -89.6;
@@ -51,8 +50,34 @@ window.MapModal = (() => {
         if (geo) { lat = geo.lat; lng = geo.lng; }
       }
 
-      map.setView([lat, lng], 15);
-      setStatus('Zoom to your field area — CLU boundaries load automatically');
+      // Draw any preselected fields that have stored polygon points
+      if (selectedFields.length > 0) {
+        const bounds = [];
+        selectedFields.forEach(f => {
+          if (!f.points || f.points.length < 3) return;
+          const latlngs = f.points.map(p => [p.lat, p.lng]);
+          const poly = L.polygon(latlngs, fieldStyle(true)).addTo(cluLayer);
+          poly._field = { ...f, polygon: poly };
+          poly.on('click', e => { L.DomEvent.stopPropagation(e); toggleField(poly); });
+          poly.bindTooltip(`${parseFloat(f.acres||0).toFixed(1)} ac — ${f.fieldName||f.id}`,
+            { permanent: false, direction: 'center', className: 'clu-tooltip' });
+          // Update reference in selectedFields
+          const idx = selectedFields.findIndex(s => s.id === f.id);
+          if (idx > -1) selectedFields[idx] = { ...selectedFields[idx], polygon: poly };
+          latlngs.forEach(ll => bounds.push(ll));
+        });
+        // Fit map to preselected fields
+        if (bounds.length) {
+          map.fitBounds(bounds, { padding: [40, 40] });
+        } else {
+          map.setView([lat, lng], 15);
+        }
+        updateSelectedPanel();
+        setStatus(`${selectedFields.length} field${selectedFields.length!==1?'s':''} loaded — draw more or confirm`);
+      } else {
+        map.setView([lat, lng], 15);
+        setStatus('Zoom to your field area, then draw a boundary or paste KML');
+      }
     }, 120);
   }
 

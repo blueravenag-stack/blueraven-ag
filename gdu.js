@@ -38,11 +38,16 @@ window.GDUCalc = (() => {
 
   function fungicideWindow(rm) {
     const vtGDU = gduToVT(rm);
+    // VT = tasseling = 100% of GDU to VT
+    // R1 = silking = ~105-110% of GDU to VT
+    // Ideal fungicide window: VT through R1
+    // Alert window starts at 80% (approaching tassel) so pilot can schedule
     return {
-      start:  Math.round(vtGDU * FUNG_START),
-      target: Math.round(vtGDU * FUNG_TARGET),
-      end:    Math.round(vtGDU * FUNG_END),
+      start:  Math.round(vtGDU * FUNG_START),   // 80% = early alert
+      target: Math.round(vtGDU * 1.0),           // 100% = VT, start applying
+      end:    Math.round(vtGDU * FUNG_END),       // 105% = R1, last chance
       vtGDU,
+      r1GDU:  Math.round(vtGDU * 1.07),          // R1 definition for display
     };
   }
 
