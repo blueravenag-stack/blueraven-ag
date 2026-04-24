@@ -269,27 +269,26 @@
           <p class="panel-sub">Calculate chemical quantities for any batch size without needing an order.</p>
           <div class="form-group">
             <label class="form-label">Mix Template</label>
-            <select class="form-input" id="mixCalcTemplate" onchange="runMixCalc()">
+            <select class="form-input" id="mixCalcTemplate" onchange="onMixCalcTemplateChange()">
               <option value="">— Select template —</option>
             </select>
           </div>
-          <p style="font-size:0.78rem;color:var(--text-sub);margin:0.25rem 0 0.5rem">Enter acres OR total gallons — the other is calculated automatically.</p>
-          <div style="display:flex;gap:0.75rem;flex-wrap:wrap;margin-top:0.5rem">
-            <div class="calc-tank" style="flex:1;min-width:90px">
+          <div style="font-size:0.78rem;color:var(--text-sub);margin:0.3rem 0 0.6rem">
+            Spray rate from template: <strong id="mixCalcSprayRateDisplay">—</strong>
+            · Acres and gallons update each other automatically
+          </div>
+          <div style="display:flex;gap:0.75rem;flex-wrap:wrap">
+            <div class="calc-tank" style="flex:1;min-width:100px">
               <label class="form-label">Acres</label>
-              <input class="form-input" type="number" id="mixCalcAcres" placeholder="e.g. 120" oninput="runMixCalc()">
+              <input class="form-input" type="number" step="0.1" id="mixCalcAcres" placeholder="e.g. 80" oninput="onMixCalcAcresInput()">
             </div>
-            <div class="calc-tank" style="flex:1;min-width:90px">
+            <div class="calc-tank" style="flex:1;min-width:100px">
               <label class="form-label">Total Gallons</label>
-              <input class="form-input" type="number" id="mixCalcTotalGal" placeholder="e.g. 400" oninput="runMixCalc()">
+              <input class="form-input" type="number" id="mixCalcTotalGal" placeholder="e.g. 1200" oninput="onMixCalcGalInput()">
             </div>
-            <div class="calc-tank" style="flex:1;min-width:90px">
-              <label class="form-label">Tank Size (gal)</label>
-              <input class="form-input" type="number" id="mixCalcTankSize" value="100" oninput="runMixCalc()">
-            </div>
-            <div class="calc-tank" style="flex:1;min-width:90px">
-              <label class="form-label">Spray Rate (gal/ac)</label>
-              <input class="form-input" type="number" id="mixCalcGalPerAc" value="15" oninput="runMixCalc()">
+            <div class="calc-tank" style="flex:1;min-width:100px">
+              <label class="form-label">Tank Size (gal) <span style="font-weight:normal;color:var(--text-sub)">optional</span></label>
+              <input class="form-input" type="number" id="mixCalcTankSize" placeholder="e.g. 100" oninput="runMixCalc()">
             </div>
           </div>
         </div>
@@ -440,7 +439,10 @@
         <div class="form-group"><label class="form-label">Template Name *</label><input class="form-input" type="text" id="mName" placeholder="e.g. Standard Corn Burndown"></div>
         <div class="form-group"><label class="form-label">Crop Type</label><select class="form-input" id="mCropType"><option>Corn</option><option>Soybeans</option><option>Wheat</option><option>Sorghum</option><option>Cotton</option><option>General</option><option>Other</option></select></div>
       </div>
-      <div class="form-row"><div class="form-group"><label class="form-label">Status</label><select class="form-input" id="mActive"><option value="Yes">Active</option><option value="No">Inactive</option></select></div></div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Status</label><select class="form-input" id="mActive"><option value="Yes">Active</option><option value="No">Inactive</option></select></div>
+        <div class="form-group"><label class="form-label">Spray Rate (gal/ac)</label><input class="form-input" type="number" step="0.1" id="mSprayRate" value="15" placeholder="15"></div>
+      </div>
       <div class="form-group"><label class="form-label">Description</label><textarea class="form-input" id="mDescription" rows="2" placeholder="When to use this mix, timing notes..."></textarea></div>
     </div>
     <div class="form-section">

@@ -163,7 +163,7 @@ function orderHeaders()       { return ['OrderID','OrderDate','CustomerID','Cust
 function customerHeaders()    { return ['CustomerID','Name','Phone','Email','Address','City','State','Zip','Notes']; }
 function pilotHeaders()       { return ['PilotID','Name','Phone','Email','FAA_Part107_Num','Active']; }
 function productHeaders()     { return ['ProductID','ProductName','Manufacturer','Unit','CostPerUnit','REI_Hours','PHI_Days','Notes']; }
-function templateHeaders()    { return ['TemplateID','TemplateName','CropType','Description','Active']; }
+function templateHeaders()    { return ['TemplateID','TemplateName','CropType','SprayRate','Description','Active']; }
 function templateProdHeaders(){ return ['LineID','TemplateID','ProductID','ProductName','RatePerAcre','Unit','SuppliedBy','Notes']; }
 function orderProdHeaders()   { return ['LineID','OrderID','ProductID','ProductName','RatePerAcre','Unit','SuppliedBy','CostPerUnit','Acres','TotalUnitsNeeded','TotalProductCost']; }
 function fieldHeaders()       { return ['FieldID','CustomerID','CustomerName','FieldName','Acres','CentroidLat','CentroidLng','PolygonKML','CLU_TractID','CLU_FarmNum','Active','Notes']; }
@@ -634,6 +634,7 @@ async function saveMix() {
     TemplateID:   templateId,
     TemplateName: name,
     CropType:     document.getElementById('mCropType').value,
+    SprayRate:    parseFloat(document.getElementById('mSprayRate')?.value) || 15,
     Active:       document.getElementById('mActive').value,
     Description:  document.getElementById('mDescription').value.trim(),
   };
@@ -1205,40 +1206,88 @@ function runOrderCalc() {
 // ── TAB 2: MIX CALC (no order needed) ────────────────────────────────────────
 function renderMixCalc() {
   const tmplSel = document.getElementById('mixCalcTemplate');
-  if (tmplSel && tmplSel.options.length <= 1) {
+  if (tmplSel) {
+    tmplSel.innerHTML = '<option value="">— Select template —</option>';
     DB.templates.filter(t => t.Active === 'Yes').forEach(t => {
       const o = document.createElement('option');
-      o.value = t.TemplateID; o.textContent = t.TemplateName + ' (' + t.CropType + ')';
+      o.value = t.TemplateID;
+      o.textContent = t.TemplateName + ' (' + t.CropType + (t.SprayRate ? ' · ' + t.SprayRate + ' gal/ac' : '') + ')';
       tmplSel.appendChild(o);
     });
   }
   runMixCalc();
 }
 
+// Track which mix calc input was last changed so they override each other
+let mixCalcLastChanged = 'acres'; // 'acres' or 'gallons'
+
+function onMixCalcAcresInput() {
+  mixCalcLastChanged = 'acres';
+  // Sync gallons from acres
+  const tmplId  = document.getElementById('mixCalcTemplate')?.value;
+  const tmpl    = DB.templates.find(t => t.TemplateID === tmplId);
+  const galPerAc= parseFloat(tmpl?.SprayRate || 15);
+  const acres   = parseFloat(document.getElementById('mixCalcAcres')?.value || 0);
+  if (acres > 0) {
+    const galEl = document.getElementById('mixCalcTotalGal');
+    if (galEl) galEl.value = (acres * galPerAc).toFixed(0);
+  }
+  runMixCalc();
+}
+
+function onMixCalcGalInput() {
+  mixCalcLastChanged = 'gallons';
+  // Sync acres from gallons
+  const tmplId  = document.getElementById('mixCalcTemplate')?.value;
+  const tmpl    = DB.templates.find(t => t.TemplateID === tmplId);
+  const galPerAc= parseFloat(tmpl?.SprayRate || 15);
+  const gal     = parseFloat(document.getElementById('mixCalcTotalGal')?.value || 0);
+  if (gal > 0 && galPerAc > 0) {
+    const acEl = document.getElementById('mixCalcAcres');
+    if (acEl) acEl.value = (gal / galPerAc).toFixed(1);
+  }
+  runMixCalc();
+}
+
+function onMixCalcTemplateChange() {
+  // When template changes, update spray rate display and recalc
+  const tmplId = document.getElementById('mixCalcTemplate')?.value;
+  const tmpl   = DB.templates.find(t => t.TemplateID === tmplId);
+  const rate   = parseFloat(tmpl?.SprayRate || 15);
+  const rateEl = document.getElementById('mixCalcSprayRateDisplay');
+  if (rateEl) rateEl.textContent = rate + ' gal/ac';
+  // Recalc from whichever was last changed
+  if (mixCalcLastChanged === 'acres') onMixCalcAcresInput();
+  else onMixCalcGalInput();
+}
+
 function runMixCalc() {
   const resultsEl = document.getElementById('mixCalcResults');
   if (!resultsEl) return;
   const tmplId   = document.getElementById('mixCalcTemplate')?.value;
-  const galPerAc = parseFloat(document.getElementById('mixCalcGalPerAc')?.value || 15);
-  const totalGal = parseFloat(document.getElementById('mixCalcTotalGal')?.value || 0);
-  const totalAcIn= parseFloat(document.getElementById('mixCalcAcres')?.value || 0);
-  const tankSize  = parseFloat(document.getElementById('mixCalcTankSize')?.value || 100);
-
   if (!tmplId) { resultsEl.innerHTML = '<div class="calc-empty">Select a mix template above</div>'; return; }
+
+  const tmpl     = DB.templates.find(t => t.TemplateID === tmplId);
+  const galPerAc = parseFloat(tmpl?.SprayRate || 15);
+  const totalGal = parseFloat(document.getElementById('mixCalcTotalGal')?.value || 0);
+  const totalAc  = parseFloat(document.getElementById('mixCalcAcres')?.value || 0);
+  const tankSize = parseFloat(document.getElementById('mixCalcTankSize')?.value || 0);
 
   const prods = DB.templateProds.filter(p => p.TemplateID === tmplId);
   if (!prods.length) { resultsEl.innerHTML = '<div class="calc-empty">No chemicals in this template</div>'; return; }
 
-  // Derive gallons from whichever input was provided
-  let gallons = 0;
-  if (totalGal > 0)       gallons = totalGal;
-  else if (totalAcIn > 0) gallons = totalAcIn * galPerAc;
-  else if (tankSize > 0)  gallons = tankSize;
-  if (!gallons) { resultsEl.innerHTML = '<div class="calc-empty">Enter total gallons, acres, or tank size</div>'; return; }
+  // gallons and acres stay in sync via the input handlers
+  // Use whichever is available
+  const gallons = totalGal > 0 ? totalGal : (totalAc > 0 ? totalAc * galPerAc : 0);
+  const acres   = gallons > 0 && galPerAc > 0 ? gallons / galPerAc : totalAc;
+  if (!gallons && !acres) {
+    resultsEl.innerHTML = '<div class="calc-empty">Enter acres or total gallons to calculate</div>';
+    return;
+  }
 
-  const acres    = galPerAc > 0 ? gallons / galPerAc : 0;
-  const loads    = tankSize > 0 ? Math.ceil(gallons / tankSize) : 1;
-  const galPerLoad = loads > 0 ? gallons / loads : gallons;
+  // Tank size is informational only — doesn't override gallons or acres
+  const loads      = tankSize > 0 ? Math.ceil(gallons / tankSize) : 1;
+  const galPerLoad = loads > 0 && gallons > 0 ? gallons / loads : gallons;
 
   const rows = prods.map(p => {
     const rate       = parseFloat(p.RatePerAcre || 0);
@@ -1251,17 +1300,23 @@ function runMixCalc() {
       <div class="calc-product-qty">${totalDisp} total</div>
       <div class="calc-product-detail">
         <span>${perDisp}/load · ${rate} ${p.Unit}/ac</span>
-        <span style="color:var(--text-sub)">${p.SuppliedBy === 'Customer' ? 'By customer' : ''}</span>
+        <span style="color:var(--text-sub);font-size:0.75rem">${p.SuppliedBy === 'Customer' ? 'By customer' : ''}</span>
       </div>
     </div>`;
   }).join('');
 
+  const loadsDisp    = tankSize > 0 ? loads : '—';
+  const galLoadDisp  = tankSize > 0 ? galPerLoad.toFixed(0) : '—';
+
   resultsEl.innerHTML = `
     <div class="calc-summary-row">
-      <div class="calc-summary-item"><div class="calc-summary-val">${gallons.toFixed(0)}</div><div class="calc-summary-lbl">Total Gal</div></div>
       <div class="calc-summary-item"><div class="calc-summary-val">${acres.toFixed(1)}</div><div class="calc-summary-lbl">Acres</div></div>
-      <div class="calc-summary-item accent"><div class="calc-summary-val">${loads}</div><div class="calc-summary-lbl">Loads</div></div>
-      <div class="calc-summary-item"><div class="calc-summary-val">${galPerLoad.toFixed(0)}</div><div class="calc-summary-lbl">Gal/Load</div></div>
+      <div class="calc-summary-item"><div class="calc-summary-val">${gallons.toFixed(0)}</div><div class="calc-summary-lbl">Total Gal</div></div>
+      <div class="calc-summary-item accent"><div class="calc-summary-val">${loadsDisp}</div><div class="calc-summary-lbl">Loads</div></div>
+      <div class="calc-summary-item"><div class="calc-summary-val">${galLoadDisp}</div><div class="calc-summary-lbl">Gal/Load</div></div>
+    </div>
+    <div style="font-size:0.75rem;color:var(--text-sub);margin-bottom:0.75rem">
+      Spray rate: ${galPerAc} gal/ac (from template)${tankSize > 0 ? ' · ' + tankSize + ' gal tank' : ''}
     </div>
     ${rows}`;
 }

@@ -20,7 +20,12 @@ window.MapModal = (() => {
   async function open(opts = {}) {
     onConfirmCb    = opts.onConfirm || null;
     onCloseCb      = opts.onClose   || null;
-    selectedFields = [];
+    // Restore preselected fields if provided (e.g. editing an order)
+    if (opts.preselected) {
+      selectedFields = opts.preselected.map(f => ({ ...f }));
+    } else {
+      selectedFields = [];
+    }
     drawPoints     = [];
     drawMode       = false;
 
@@ -73,6 +78,18 @@ window.MapModal = (() => {
     map.on('moveend zoomend', debounce(updateZoomStatus, 400));
     map.on('click',    onMapClick);
     map.on('dblclick', onMapDblClick);
+  }
+
+  // ── CLU LAYER MANAGEMENT ─────────────────────────────────────────────────
+  // Only clear CLU data layers, keeping drawn/pasted field polys intact
+  function clearCLULayer() {
+    // Remove layers that are NOT drawn/pasted selected fields
+    const selectedIds = new Set(selectedFields.map(f => f.id));
+    cluLayer.eachLayer(layer => {
+      if (!layer._field || !selectedIds.has(layer._field.id)) {
+        cluLayer.removeLayer(layer);
+      }
+    });
   }
 
   // ── ZOOM STATUS ───────────────────────────────────────────────────────────
@@ -149,12 +166,16 @@ window.MapModal = (() => {
     const points = drawPoints.map(ll => ({ lat: ll.lat, lng: ll.lng }));
     const acres  = GeoUtils.calcAcres(points).toFixed(1);
 
+    // Prompt for name immediately while map is still open
+    const fieldName = prompt(`Field name for this drawn area (${acres} ac):`, 'New Field') || 'Drawn Field';
+
     const drawnField = {
-      id:      'DRAWN-' + Date.now(),
-      farmNum: '',
+      id:        'DRAWN-' + Date.now(),
+      farmNum:   '',
       acres,
       points,
-      isDrawn: true
+      isDrawn:   true,
+      fieldName,
     };
 
     const poly = L.polygon(points.map(p => [p.lat, p.lng]), fieldStyle(true)).addTo(cluLayer);
@@ -164,7 +185,7 @@ window.MapModal = (() => {
 
     cancelDraw();
     updateSelectedPanel();
-    setStatus(`Drawn field added — ${acres} ac. Tap to deselect or draw another.`);
+    setStatus(`"${fieldName}" added — ${acres} ac. Draw another or confirm.`);
   }
 
   function onMapClick(e) {
@@ -201,7 +222,8 @@ window.MapModal = (() => {
       return;
     }
     const acres = GeoUtils.calcAcres(points).toFixed(1);
-    const pastedField = { id: 'PASTE-' + Date.now(), farmNum: '', acres, points, isPasted: true };
+    const fieldName = prompt(`Field name for this pasted area (${acres} ac):`, 'Pasted Field') || 'Pasted Field';
+    const pastedField = { id: 'PASTE-' + Date.now(), farmNum: '', acres, points, isPasted: true, fieldName };
 
     const poly = L.polygon(points.map(p => [p.lat, p.lng]), fieldStyle(true)).addTo(cluLayer);
     poly._field = { ...pastedField, polygon: poly };
@@ -360,7 +382,7 @@ window.MapModal = (() => {
   }
 
   function loadGeoJSON(geojson) {
-    cluLayer.clearLayers();
+    clearCLULayer();
     const features = geojson.features || [];
     let count = 0;
 
