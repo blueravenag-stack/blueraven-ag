@@ -57,24 +57,45 @@ window.GDUCalc = (() => {
 
   async function fetchWeather(lat, lng, startDate, endDate) {
     // Returns array of {date, maxF, minF}
-    const today    = new Date().toISOString().split('T')[0];
-    const results  = [];
+    // Strategy:
+    //   Open-Meteo ARCHIVE has ~5 day delay — unreliable for recent dates
+    //   Open-Meteo FORECAST covers 2 days BACK through 16 days AHEAD
+    //   So: use archive for data > 7 days old, forecast for recent + future
+    const today     = new Date().toISOString().split('T')[0];
+    const cutover   = addDays(today, -7); // use archive for data older than 7 days
+    const fcstBack  = addDays(today, -2); // forecast covers back to 2 days ago
+    const results   = [];
 
-    // Split: historical vs forecast
-    const histEnd  = startDate <= today ? (endDate <= today ? endDate : today) : null;
-    const fcstStart= endDate > today ? (startDate > today ? startDate : addDays(today, 1)) : null;
-
-    if (histEnd && startDate <= histEnd) {
-      const hist = await fetchHistorical(lat, lng, startDate, histEnd);
-      results.push(...hist);
+    // Archive: planting date → 7 days ago (reliable historical data)
+    if (startDate < cutover) {
+      const archiveEnd = endDate < cutover ? endDate : addDays(cutover, -1);
+      try {
+        const hist = await fetchHistorical(lat, lng, startDate, archiveEnd);
+        results.push(...hist);
+      } catch(e) { console.warn('Archive fetch failed:', e.message); }
     }
 
-    if (fcstStart && endDate >= fcstStart) {
-      const fcst = await fetchForecast(lat, lng, fcstStart, endDate);
-      results.push(...fcst);
+    // Forecast API: covers last 2 days through next 16 — fills the gap
+    const fcstStart = startDate > fcstBack ? startDate : fcstBack;
+    const fcstEnd   = endDate;
+    if (fcstStart <= fcstEnd) {
+      try {
+        const fcst = await fetchForecast(lat, lng, fcstStart, fcstEnd);
+        results.push(...fcst);
+      } catch(e) { console.warn('Forecast fetch failed:', e.message); }
     }
 
-    return results.sort((a, b) => a.date.localeCompare(b.date));
+    // Deduplicate by date (forecast may overlap archive), prefer archive data
+    const byDate = {};
+    results.forEach(d => {
+      if (!byDate[d.date] || d.isForecast) byDate[d.date] = d; // archive wins
+    });
+    // Actually: for the overlap zone (7-2 days ago), prefer whichever has data
+    results.forEach(d => {
+      if (!byDate[d.date]) byDate[d.date] = d;
+    });
+
+    return Object.values(byDate).sort((a, b) => a.date.localeCompare(b.date));
   }
 
   async function fetchHistorical(lat, lng, start, end) {
@@ -96,7 +117,10 @@ window.GDUCalc = (() => {
       `&forecast_days=16`;
     const res  = await fetch(url);
     const data = await res.json();
-    const all  = zipTemps(data);
+    const all   = zipTemps(data);
+    const today2= new Date().toISOString().split('T')[0];
+    // Mark future dates as forecast
+    all.forEach(d => { d.isForecast = d.date > today2; });
     // Filter to requested range
     return all.filter(d => d.date >= start && d.date <= end);
   }

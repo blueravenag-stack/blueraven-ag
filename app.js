@@ -1100,24 +1100,38 @@ function openMapForField() {
   const existLat = parseFloat(document.getElementById('fFieldLat').value) || null;
   const existLng = parseFloat(document.getElementById('fFieldLng').value) || null;
 
-  // Hide field modal while map is open, restore after
+  // Build preselected from existing KML in the field form
+  const existingKML = document.getElementById('fFieldKML')?.value || '';
+  const existingPoints = existingKML ? GeoUtils.parsePolygon(existingKML) : null;
+  const preselected = existingPoints && existingPoints.length >= 3 ? [{
+    id:        'EXISTING-' + Date.now(),
+    fieldName: document.getElementById('fFieldName').value || 'Current boundary',
+    acres:     document.getElementById('fFieldAcres').value || '0',
+    points:    existingPoints,
+    kml:       existingKML,
+    fromDB:    true,
+  }] : [];
+
+  // Hide field modal while map is open
   document.getElementById('fieldModal').style.display = 'none';
 
   MapModal.open({
-    centerLat:       existLat,
-    centerLng:       existLng,
+    centerLat:       existLat || (existingPoints ? GeoUtils.centroid(existingPoints)?.lat : null),
+    centerLng:       existLng || (existingPoints ? GeoUtils.centroid(existingPoints)?.lng : null),
     customerAddress: addr,
+    preselected,
     onConfirm: (mapFields) => {
       // Restore field modal
       document.getElementById('fieldModal').style.display = '';
       if (!mapFields.length) return;
+      // Use the first confirmed field (could be existing or newly drawn)
       const mf  = mapFields[0];
       const ctr = mf.centroid || GeoUtils.centroid(mf.points);
       if (ctr) {
         document.getElementById('fFieldLat').value = ctr.lat.toFixed(6);
         document.getElementById('fFieldLng').value = ctr.lng.toFixed(6);
       }
-      if (mf.acres) document.getElementById('fFieldAcres').value = mf.acres;
+      if (mf.acres && !mf.fromDB) document.getElementById('fFieldAcres').value = mf.acres;
       const preview = document.getElementById('fieldPolygonPreview');
       if (preview && mf.points) preview.innerHTML = GeoUtils.polygonToSVG(mf.points, { width: 240, height: 120 });
       let kmlHidden = document.getElementById('fFieldKML');
@@ -1127,10 +1141,9 @@ function openMapForField() {
         document.getElementById('fieldModal').appendChild(kmlHidden);
       }
       kmlHidden.value = mf.kml || '';
-      showToast('Field boundary loaded from map', 'success');
+      showToast('Field boundary updated from map', 'success');
     },
     onClose: () => {
-      // Restore field modal if map closed without confirming
       document.getElementById('fieldModal').style.display = '';
     }
   });
