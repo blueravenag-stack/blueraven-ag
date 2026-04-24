@@ -817,7 +817,7 @@ async function saveField() {
     Acres: document.getElementById('fFieldAcres').value || '',
     CentroidLat: document.getElementById('fFieldLat').value || '',
     CentroidLng: document.getElementById('fFieldLng').value || '',
-    PolygonKML: editId ? (DB.fields.find(f => f.FieldID === editId)?.PolygonKML || '') : '',
+    PolygonKML: document.getElementById('fFieldKML')?.value || (editId ? (DB.fields.find(f => f.FieldID === editId)?.PolygonKML || '') : ''),
     CLU_TractID: '', CLU_FarmNum: '',
     Active: document.getElementById('fFieldActive').value,
     Notes: document.getElementById('fFieldNotes').value
@@ -935,6 +935,120 @@ function renderOrderFieldsList() {
 
   // Update chem line acres
   document.querySelectorAll('.chem-acres').forEach(el => el.textContent = total.toFixed(1));
+}
+
+
+// ── MAP INTEGRATION ───────────────────────────────────────────────────────────
+
+function openMapForOrder() {
+  const custId = document.getElementById('fCustomer').value;
+  if (!custId) { showToast('Select a customer first', 'error'); return; }
+
+  const cust = DB.customers.find(c => c.CustomerID === custId);
+  const addr = cust ? [cust.Address, cust.City, cust.State].filter(Boolean).join(', ') : '';
+
+  // Use centroid of already-selected fields as center if available
+  let centerLat, centerLng;
+  if (orderFieldsSelected.length) {
+    const pts = orderFieldsSelected.flatMap(f => {
+      const field = DB.fields.find(x => x.FieldID === f.FieldID);
+      return field?.CentroidLat ? [{ lat: parseFloat(field.CentroidLat), lng: parseFloat(field.CentroidLng) }] : [];
+    });
+    if (pts.length) {
+      const ctr = GeoUtils.centroid(pts);
+      centerLat = ctr.lat; centerLng = ctr.lng;
+    }
+  }
+
+  MapModal.open({
+    centerLat,
+    centerLng,
+    customerAddress: addr,
+    onConfirm: (mapFields) => onMapFieldsConfirmed(mapFields, custId, cust?.Name || '')
+  });
+}
+
+async function onMapFieldsConfirmed(mapFields, custId, custName) {
+  // Each mapField: {id, farmNum, acres, points, kml, centroid}
+  // Save each as a Field record then add to order selection
+  for (const mf of mapFields) {
+    // Check if already exists (same CLU id)
+    let existing = mf.id.startsWith('DRAWN') || mf.id.startsWith('PASTE')
+      ? null
+      : DB.fields.find(f => f.CLU_TractID === mf.id && f.CustomerID === custId);
+
+    if (!existing) {
+      // Create new Field record
+      const ctr = mf.centroid || GeoUtils.centroid(mf.points);
+      const fieldId = nextId('FLD', DB.fields.map(f => f.FieldID));
+      const suggestedName = mf.farmNum ? `Farm ${mf.farmNum} Field ${mf.id}` : `Field ${fieldId}`;
+
+      const field = {
+        FieldID:      fieldId,
+        CustomerID:   custId,
+        CustomerName: custName,
+        FieldName:    suggestedName,
+        Acres:        mf.acres,
+        CentroidLat:  ctr ? ctr.lat.toFixed(6) : '',
+        CentroidLng:  ctr ? ctr.lng.toFixed(6) : '',
+        PolygonKML:   mf.kml || '',
+        CLU_TractID:  mf.id.startsWith('DRAWN') || mf.id.startsWith('PASTE') ? '' : mf.id,
+        CLU_FarmNum:  mf.farmNum || '',
+        Active:       'Yes',
+        Notes:        ''
+      };
+      DB.fields.push(field);
+      await writeRow('fields', field);
+      existing = field;
+    }
+
+    // Add to order selection if not already there
+    if (!orderFieldsSelected.find(f => f.FieldID === existing.FieldID)) {
+      orderFieldsSelected.push(existing);
+    }
+  }
+  saveToLocalStorage();
+  renderOrderFieldsList();
+  showToast(`${mapFields.length} field${mapFields.length !== 1 ? 's' : ''} added`, 'success');
+}
+
+function openMapForField() {
+  // Open map from the field edit modal
+  const custId   = document.getElementById('fFieldCustomer').value;
+  const cust     = DB.customers.find(c => c.CustomerID === custId);
+  const addr     = cust ? [cust.Address, cust.City, cust.State].filter(Boolean).join(', ') : '';
+  const existLat = parseFloat(document.getElementById('fFieldLat').value) || null;
+  const existLng = parseFloat(document.getElementById('fFieldLng').value) || null;
+
+  MapModal.open({
+    centerLat:       existLat,
+    centerLng:       existLng,
+    customerAddress: addr,
+    onConfirm: (mapFields) => {
+      if (!mapFields.length) return;
+      // Take first selected field — populate form fields
+      const mf  = mapFields[0];
+      const ctr = mf.centroid || GeoUtils.centroid(mf.points);
+      if (ctr) {
+        document.getElementById('fFieldLat').value = ctr.lat.toFixed(6);
+        document.getElementById('fFieldLng').value = ctr.lng.toFixed(6);
+      }
+      if (mf.acres) document.getElementById('fFieldAcres').value = mf.acres;
+      // Show polygon preview
+      const preview = document.getElementById('fieldPolygonPreview');
+      if (preview && mf.points) preview.innerHTML = GeoUtils.polygonToSVG(mf.points, { width: 240, height: 120 });
+      // Store KML in a hidden field
+      let kmlHidden = document.getElementById('fFieldKML');
+      if (!kmlHidden) {
+        kmlHidden = document.createElement('input');
+        kmlHidden.type = 'hidden';
+        kmlHidden.id   = 'fFieldKML';
+        document.getElementById('fieldModal').appendChild(kmlHidden);
+      }
+      kmlHidden.value = mf.kml || '';
+      showToast('Field boundary loaded from map', 'success');
+    }
+  });
 }
 
 // ── BATCH CALCULATOR ─────────────────────────────────────────────────────────

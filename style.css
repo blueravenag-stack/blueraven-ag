@@ -669,3 +669,36 @@ textarea.form-input { resize: vertical; }
 .order-field-chip-remove { background: none; border: none; color: var(--text-sub); cursor: pointer; font-size: 1rem; line-height: 1; padding: 0; margin-left: 0.1rem; }
 .order-field-chip-remove:hover { color: var(--danger); }
 .order-fields-summary { font-size: 0.85rem; color: var(--text-sub); margin-bottom: 0.5rem; }
+
+/* ── MAP MODAL ── */
+.modal-map { width: 96vw; max-width: 1100px; height: 86vh; display: flex; flex-direction: column; padding: 0; }
+.modal-map .modal-header { padding: 0.75rem 1rem; flex-shrink: 0; border-bottom: 1px solid var(--border); }
+.map-layout { display: flex; flex: 1; overflow: hidden; }
+.map-sidebar { width: 240px; flex-shrink: 0; display: flex; flex-direction: column; padding: 0.75rem; border-right: 1px solid var(--border); overflow-y: auto; gap: 0.5rem; background: var(--bg2); }
+.map-container { flex: 1; min-height: 0; }
+.map-status { font-size: 0.78rem; color: var(--text-sub); background: var(--bg3); border-radius: var(--radius); padding: 0.4rem 0.6rem; line-height: 1.4; }
+.map-selected-label { font-size: 0.7rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-sub); margin-top: 0.25rem; }
+.map-selected-list { display: flex; flex-direction: column; gap: 0.3rem; flex: 1; }
+.map-sel-chip { display: flex; align-items: center; gap: 0.3rem; background: rgba(79,195,247,0.12); border: 1px solid var(--accent); border-radius: 4px; padding: 0.3rem 0.5rem; font-size: 0.78rem; }
+.map-sel-chip span:first-child { flex: 1; color: var(--text); }
+.map-sel-chip span:nth-child(2) { color: var(--text-sub); white-space: nowrap; }
+.map-sel-chip button { background: none; border: none; color: var(--text-sub); cursor: pointer; font-size: 1rem; padding: 0; line-height: 1; }
+.map-sel-chip button:hover { color: var(--danger); }
+.map-sel-total { font-size: 0.8rem; font-weight: 600; color: var(--accent); border-top: 1px solid var(--border); padding-top: 0.4rem; margin-top: 0.2rem; }
+.map-sidebar-footer { margin-top: auto; display: flex; flex-direction: column; gap: 0.4rem; padding-top: 0.5rem; border-top: 1px solid var(--border); }
+.clu-tooltip { background: var(--bg2) !important; border: 1px solid var(--border) !important; color: var(--text) !important; font-size: 0.78rem !important; }
+#mapDrawBtn.active { background: rgba(255,183,77,0.15); border-color: var(--warn); color: var(--warn); }
+
+/* Leaflet overrides for dark theme */
+.leaflet-container { background: #1a1a1a; }
+.leaflet-control-zoom a { background: var(--bg2) !important; color: var(--text) !important; border-color: var(--border) !important; }
+body.light .leaflet-container { background: #e8e8e8; }
+
+@media (max-width: 640px) {
+  .modal-map { width: 100vw; height: 100vh; border-radius: 0; }
+  .map-layout { flex-direction: column-reverse; }
+  .map-sidebar { width: 100%; max-height: 200px; border-right: none; border-top: 1px solid var(--border); flex-direction: row; flex-wrap: wrap; align-items: flex-start; }
+  .map-container { flex: 1; min-height: 0; }
+  .map-sidebar-footer { flex-direction: row; margin-top: 0; border-top: none; }
+  .map-selected-list { flex-direction: row; flex-wrap: wrap; }
+}
