@@ -70,48 +70,20 @@ window.MapModal = (() => {
     cluLayer  = L.featureGroup().addTo(map);
     drawLayer = L.featureGroup().addTo(map);
 
-    map.on('moveend zoomend', debounce(loadCLU, 700));
+    map.on('moveend zoomend', debounce(updateZoomStatus, 400));
     map.on('click',    onMapClick);
     map.on('dblclick', onMapDblClick);
   }
 
-  // ── CLU LOADING ───────────────────────────────────────────────────────────
-  async function loadCLU() {
+  // ── ZOOM STATUS ───────────────────────────────────────────────────────────
+  function updateZoomStatus() {
     if (!map) return;
-    if (map.getZoom() < 13) {
-      cluLayer.clearLayers();
-      setStatus('Zoom in closer to see CLU field boundaries');
-      return;
+    const z = map.getZoom();
+    if (z < 14) {
+      setStatus('Zoom in to field level — then use ✏ Draw or 📋 Paste KML to add a field');
+    } else {
+      setStatus('✏ Click "Draw Field" to trace the field boundary, or paste KML below');
     }
-
-    const b = map.getBounds();
-    const bounds = {
-      minLat: b.getSouth(), minLng: b.getWest(),
-      maxLat: b.getNorth(), maxLng: b.getEast()
-    };
-
-    setStatus('Loading CLU boundaries...');
-    const fields = await GeoUtils.fetchCLU(bounds);
-    cluLayer.clearLayers();
-
-    if (!fields.length) {
-      setStatus('No CLU data for this area — draw a field manually or paste KML');
-      return;
-    }
-
-    fields.forEach(f => {
-      if (!f.points || f.points.length < 3) return;
-      const isSelected = selectedFields.some(s => s.id === f.id);
-      const poly = L.polygon(f.points.map(p => [p.lat, p.lng]), fieldStyle(isSelected)).addTo(cluLayer);
-      poly._field = { ...f };
-      poly.on('click', e => { L.DomEvent.stopPropagation(e); toggleField(poly); });
-      poly.bindTooltip(
-        `${f.acres} ac${f.farmNum ? ' · Farm ' + f.farmNum : ''}`,
-        { permanent: false, direction: 'center', className: 'clu-tooltip' }
-      );
-    });
-
-    setStatus(`${fields.length} CLU field${fields.length !== 1 ? 's' : ''} loaded — tap to select`);
   }
 
   function fieldStyle(selected) {
@@ -274,6 +246,21 @@ window.MapModal = (() => {
     updateSelectedPanel();
   }
 
+  // ── ADDRESS SEARCH ────────────────────────────────────────────────────────
+  async function searchAddress() {
+    const input = document.getElementById('mapAddressInput');
+    const val   = input?.value?.trim();
+    if (!val) return;
+    setStatus('Searching...');
+    const geo = await GeoUtils.geocodeAddress(val);
+    if (geo) {
+      map.setView([geo.lat, geo.lng], 16);
+      setStatus('Zoomed to location — draw your field boundary or paste KML');
+    } else {
+      setStatus('⚠ Address not found — try a nearby town or road intersection');
+    }
+  }
+
   // ── CONFIRM ───────────────────────────────────────────────────────────────
   function confirm() {
     if (!selectedFields.length) return;
@@ -310,6 +297,6 @@ window.MapModal = (() => {
   }
 
   // ── PUBLIC ────────────────────────────────────────────────────────────────
-  return { open, close, confirm, toggleDraw, finishDrawBtn, removeSelected, showPastePanel, applyPastedKML };
+  return { open, close, confirm, toggleDraw, finishDrawBtn, removeSelected, showPastePanel, applyPastedKML, searchAddress };
 
 })();
