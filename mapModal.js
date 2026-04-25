@@ -742,29 +742,21 @@ window.MapModal = (() => {
 
   function onEditMapClick(e) {
     if (!_editingField) return;
-    // Add a new vertex if click is near the polygon edge
-    const ll = e.latlng;
-    // Find the closest edge to insert the new point
-    const latlngs = _editMarkers.map(m => m.getLatLng());
-    let minDist = Infinity, insertAt = latlngs.length;
-    for (let i = 0; i < latlngs.length; i++) {
-      const a = latlngs[i], b = latlngs[(i+1) % latlngs.length];
+    const ll   = e.latlng;
+    const poly = _editingField.poly;
+    const pts  = _editMarkers.map(m => m.getLatLng());
+
+    // Find closest edge and insertion point
+    let minDist = Infinity, insertAt = pts.length;
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[i], b = pts[(i+1) % pts.length];
       const d = pointToSegmentDist(ll, a, b);
       if (d < minDist) { minDist = d; insertAt = i+1; }
     }
 
-    // Only add vertex if click is reasonably close to the polygon edge
-    // (within ~20 pixels at current zoom)
-    const poly = _editingField.poly;
-    const edgePts = _editMarkers.map(m => m.getLatLng());
-    let minDist = Infinity;
-    for (let i = 0; i < edgePts.length; i++) {
-      const a = edgePts[i], b = edgePts[(i+1) % edgePts.length];
-      minDist = Math.min(minDist, pointToSegmentDist(ll, a, b));
-    }
-    // Convert pixel threshold to meters at current zoom
+    // Only insert if within ~20 pixels of the edge at current zoom
     const metersPerPixel = 40075016.686 * Math.cos(ll.lat * Math.PI/180) / Math.pow(2, map.getZoom() + 8);
-    if (minDist > metersPerPixel * 20) return; // click too far from edge
+    if (minDist > metersPerPixel * 20) return;
 
     const newMarker = makeVertexMarker(ll, poly);
     _editMarkers.splice(insertAt, 0, newMarker);
