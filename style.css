@@ -810,3 +810,26 @@ body.light .leaflet-container { background: #e8e8e8; }
 .gdu-daily-table td { padding: 0.25rem 0.5rem; border-bottom: 1px solid var(--border); }
 .gdu-daily-table tr:last-child td { border-bottom: none; }
 .gdu-daily-table .forecast-row { color: var(--text-sub); font-style: italic; }
+
+/* ── OPERATIONS REPORT ── */
+.report-filters { display:flex; gap:0.75rem; flex-wrap:wrap; margin-bottom:1rem; align-items:flex-end; }
+.report-filter-group { display:flex; flex-direction:column; gap:0.25rem; min-width:130px; }
+.report-filter-group.row { flex-direction:row; align-items:center; gap:0.4rem; }
+.report-summary-header { background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius); padding:0.6rem 1rem; font-size:0.85rem; margin-bottom:1rem; box-shadow:var(--shadow); }
+.report-section { background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius); padding:1rem; margin-bottom:1rem; box-shadow:var(--shadow); }
+.report-section-title { font-size:0.7rem; font-weight:600; text-transform:uppercase; letter-spacing:0.1em; color:var(--text-sub); margin-bottom:0.75rem; }
+.report-table { width:100%; border-collapse:collapse; font-size:0.82rem; }
+.report-table th { text-align:left; padding:0.35rem 0.5rem; border-bottom:2px solid var(--border); color:var(--text-sub); font-size:0.72rem; text-transform:uppercase; letter-spacing:0.06em; white-space:nowrap; }
+.report-table td { padding:0.4rem 0.5rem; border-bottom:1px solid var(--border); }
+.report-table tbody tr:hover { background:var(--bg3); }
+.report-table tfoot td { border-top:2px solid var(--border); border-bottom:none; }
+.report-map-container { height:340px; border-radius:var(--radius); overflow:hidden; border:1px solid var(--border); }
+
+/* ── GDU progress bar updates ── */
+.gdu-vt-label {
+  position: absolute; top: -18px;
+  font-size: 0.62rem; font-weight: 700;
+  color: var(--danger); transform: translateX(-50%);
+  white-space: nowrap; pointer-events: none;
+}
+.gdu-daily-table .window-row { background: rgba(255,183,77,0.08); }

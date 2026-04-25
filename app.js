@@ -1037,11 +1037,21 @@ function openMapForOrder() {
     };
   }).filter(f => f.points && f.points.length >= 3);
 
+  // Load all customer fields with KML as background context
+  const customerFields = DB.fields
+    .filter(f => f.CustomerID === custId && f.PolygonKML && f.Active !== 'No')
+    .map(f => {
+      const points = GeoUtils.parsePolygon(f.PolygonKML);
+      if (!points || points.length < 3) return null;
+      return { id: f.FieldID, fieldName: f.FieldName, acres: f.Acres||'0', points, kml: f.PolygonKML, fromDB: true };
+    }).filter(Boolean);
+
   MapModal.open({
     centerLat,
     centerLng,
     customerAddress: addr,
     preselected,
+    customerFields,
     onConfirm: async (mapFields) => {
       // Prompt for name on drawn/pasted fields before saving
       for (const mf of mapFields) {
@@ -1517,13 +1527,12 @@ function renderGDUCard(r) {
         <div class="gdu-progress-fill" style="width:${barWidth}"></div>
         <!-- VT-R1 window band -->
         <div class="gdu-window-band" style="left:${winStartPct};width:${Math.min(100,r.windowEndGDU/r.vtGDU*100) - Math.min(100,r.windowStartGDU/r.vtGDU*100)}%" title="VT–R1 fungicide window"></div>
-        <!-- VT marker -->
-        <div class="gdu-progress-vt" style="left:${vtPct}" title="VT tasseling"></div>
+        <div class="gdu-vt-label" style="left:${vtPct}" title="VT — Begin applying">VT</div>
       </div>
       <div class="gdu-progress-labels">
         <span>Planting</span>
-        <span style="color:var(--warn)">▼ Window</span>
-        <span>VT (${r.vtGDU} GDU)</span>
+        <span style="color:var(--warn);font-size:0.68rem">▓ Fungicide window (VT→R1)</span>
+        <span>VT=${r.vtGDU} GDU</span>
       </div>
     </div>
 
@@ -1564,18 +1573,17 @@ function renderGDUCard(r) {
       <table>
         <thead><tr><th>Date</th><th>High</th><th>Low</th><th>GDU/day</th><th>Cum GDU</th><th></th></tr></thead>
         <tbody>
-          ${(r.withGDU || []).slice(-20).map(d => `
-            <tr class="${d.isForecast ? 'forecast-row' : ''}">
+          ${(r.withGDU||[]).filter(d=>(d.cumGDU||0)<=(r.windowEndGDU||9999)*1.05).map(d=>`<tr class="${d.isForecast?'forecast-row':''} ${d.cumGDU>=r.windowStartGDU&&d.cumGDU<=r.windowEndGDU?'window-row':''}">
               <td>${d.date}</td>
-              <td>${d.maxF != null ? d.maxF.toFixed(1) + '°' : '—'}</td>
-              <td>${d.minF != null ? d.minF.toFixed(1) + '°' : '—'}</td>
-              <td>${d.dailyGDU != null ? d.dailyGDU.toFixed(1) : '—'}</td>
-              <td>${d.cumGDU != null ? Math.round(d.cumGDU) : '—'}</td>
-              <td style="color:var(--text-sub);font-size:0.7rem">${d.tier===3?'seasonal':d.isForecast?'forecast':''}</td>
+              <td>${d.maxF!=null?d.maxF.toFixed(1)+'°':'—'}</td>
+              <td>${d.minF!=null?d.minF.toFixed(1)+'°':'—'}</td>
+              <td>${d.dailyGDU!=null?d.dailyGDU.toFixed(1):'—'}</td>
+              <td>${d.cumGDU!=null?Math.round(d.cumGDU):'—'}</td>
+              <td style="color:var(--text-sub);font-size:0.7rem">${d.tier===3?'seasonal':d.isForecast?'GFS':'ERA5'}</td>
             </tr>`).join('')}
         </tbody>
       </table>
-      ${(r.withGDU || []).length > 20 ? `<div style="color:var(--text-sub);font-size:0.75rem;padding:0.4rem">Showing last 20 of ${r.withGDU.length} days</div>` : ''}
+      <div style="color:var(--text-sub);font-size:0.72rem;padding:0.3rem 0">Planting → R1 (${r.windowEndGDU} GDU) · ${(r.withGDU||[]).filter(d=>(d.cumGDU||0)<=(r.windowEndGDU||9999)*1.05).length} days</div>
     </div>
   </div>`;
 }
@@ -1628,49 +1636,244 @@ async function runGDUAnalysis() {
   if (lastRun) lastRun.textContent = 'Updated ' + new Date().toLocaleTimeString();
 }
 
-// ── REPORTS ──────────────────────────────────────────────────────────────────
-function renderReports() {
-  // Acres by crop
-  const acresByCrop = {};
-  DB.orders.filter(o => o.Status === 'Completed').forEach(o => {
-    const crop = o.CropType || 'Unknown';
-    acresByCrop[crop] = (acresByCrop[crop] || 0) + parseFloat(o.TotalAcres || 0);
-  });
-  const totalAcres = Object.values(acresByCrop).reduce((s, v) => s + v, 0);
+// ── REPORTS / OPERATIONS ─────────────────────────────────────────────────────
 
-  document.getElementById('reportAcres').innerHTML = Object.keys(acresByCrop).length ?
-    Object.entries(acresByCrop).sort((a,b) => b[1]-a[1]).map(([crop, acres]) =>
-      `<div class="report-row"><span>${crop}</span><span class="report-val">${acres.toLocaleString()} ac</span></div>`
-    ).join('') +
-    `<div class="report-total"><span>Total</span><span>${totalAcres.toLocaleString()} ac</span></div>` :
-    '<div style="color:var(--text-sub);font-size:0.85rem;padding:1rem 0">No completed orders yet</div>';
-
-  // Product usage
-  const prodUsage = {};
-  DB.orderProds.forEach(p => {
-    const name = p.ProductName;
-    if (!prodUsage[name]) prodUsage[name] = { total: 0, unit: p.Unit };
-    prodUsage[name].total += parseFloat(p.TotalUnitsNeeded || 0);
-  });
-
-  document.getElementById('reportProducts').innerHTML = Object.keys(prodUsage).length ?
-    Object.entries(prodUsage).sort((a,b) => b[1].total - a[1].total).map(([name, d]) =>
-      `<div class="report-row"><span>${name}</span><span class="report-val">${d.total.toFixed(1)} ${d.unit}</span></div>`
-    ).join('') :
-    '<div style="color:var(--text-sub);font-size:0.85rem;padding:1rem 0">No product data yet</div>';
-
-  // Revenue summary
-  const totalRevenue = DB.orders.reduce((s, o) => s + parseFloat(o.EstimatedTotal || 0), 0);
-  const totalChemCost = DB.orders.reduce((s, o) => s + parseFloat(o.ChemicalCost || 0), 0);
-  const gross = totalRevenue - totalChemCost;
-
-  document.getElementById('reportRevenue').innerHTML = `
-    <div class="report-row"><span>Estimated Revenue</span><span class="report-val">$${totalRevenue.toLocaleString('en-US',{minimumFractionDigits:2})}</span></div>
-    <div class="report-row"><span>Chemical Cost</span><span class="report-val">$${totalChemCost.toLocaleString('en-US',{minimumFractionDigits:2})}</span></div>
-    <div class="report-total"><span>Gross Margin Est.</span><span>$${gross.toLocaleString('en-US',{minimumFractionDigits:2})}</span></div>
-    <div style="color:var(--text-sub);font-size:0.75rem;margin-top:0.75rem">Based on all orders. DJI flight data import coming soon.</div>
-  `;
+function onReportDateChange() {
+  const val = document.getElementById('reportDateRange')?.value;
+  const customEl = document.getElementById('reportCustomDates');
+  if (customEl) customEl.style.display = val === 'custom' ? 'flex' : 'none';
+  renderReports();
 }
+
+function getReportDateRange() {
+  const sel = document.getElementById('reportDateRange')?.value || 'week';
+  const today = new Date();
+  today.setHours(0,0,0,0);
+
+  const fmt = d => d.toISOString().split('T')[0];
+
+  if (sel === 'custom') {
+    return {
+      from: document.getElementById('reportDateFrom')?.value || fmt(today),
+      to:   document.getElementById('reportDateTo')?.value   || fmt(today),
+      label: 'Custom range',
+    };
+  }
+
+  const dow   = today.getDay(); // 0=Sun
+  const mon   = new Date(today); mon.setDate(today.getDate() - (dow === 0 ? 6 : dow - 1));
+  const sun   = new Date(mon);  sun.setDate(mon.getDate() + 6);
+  const nextMon = new Date(mon); nextMon.setDate(mon.getDate() + 7);
+  const nextSun = new Date(sun); nextSun.setDate(sun.getDate() + 7);
+  const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+  const monthEnd   = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+  const seasonStart= new Date(today.getFullYear(), 3, 1);  // Apr 1
+  const seasonEnd  = new Date(today.getFullYear(), 10, 30); // Nov 30
+
+  const tomorrow = new Date(today); tomorrow.setDate(today.getDate() + 1);
+
+  const ranges = {
+    today:     { from: fmt(today),      to: fmt(today),      label: 'Today' },
+    tomorrow:  { from: fmt(tomorrow),   to: fmt(tomorrow),   label: 'Tomorrow' },
+    week:      { from: fmt(mon),        to: fmt(sun),        label: 'This Week' },
+    next_week: { from: fmt(nextMon),    to: fmt(nextSun),    label: 'Next Week' },
+    month:     { from: fmt(monthStart), to: fmt(monthEnd),   label: 'This Month' },
+    season:    { from: fmt(seasonStart),to: fmt(seasonEnd),  label: 'This Season' },
+  };
+  return ranges[sel] || ranges.week;
+}
+
+function renderReports() {
+  const { from, to, label } = getReportDateRange();
+  const pilotFilter  = document.getElementById('reportPilot')?.value  || '';
+  const statusFilter = document.getElementById('reportStatus')?.value || '';
+
+  // Populate pilot dropdown once
+  const pilotSel = document.getElementById('reportPilot');
+  if (pilotSel && pilotSel.options.length <= 1) {
+    DB.pilots.filter(p => p.Active === 'Yes').forEach(p => {
+      const o = document.createElement('option');
+      o.value = p.PilotID; o.textContent = p.Name;
+      pilotSel.appendChild(o);
+    });
+  }
+
+  // Filter orders by date range, pilot, status
+  const filtered = DB.orders.filter(o => {
+    const d = o.ScheduledDate || o.OrderDate || '';
+    if (!d) return false;
+    if (d < from || d > to) return false;
+    if (pilotFilter  && o.PilotID  !== pilotFilter)  return false;
+    if (statusFilter && o.Status   !== statusFilter)  return false;
+    return true;
+  }).sort((a, b) => (a.ScheduledDate||a.OrderDate||'').localeCompare(b.ScheduledDate||b.OrderDate||''));
+
+  const el = document.getElementById('reportContent');
+  if (!el) return;
+
+  if (!filtered.length) {
+    el.innerHTML = `<div class="empty-state">No orders found for ${label}</div>`;
+    return;
+  }
+
+  // ── SECTION 1: Field summary ──────────────────────────────────────────────
+  let totalAcres = 0;
+  const fieldRows = filtered.map(o => {
+    const fields = DB.orderFields.filter(f => f.OrderID === o.OrderID);
+    const ac = parseFloat(o.TotalAcres || 0);
+    totalAcres += ac;
+    return `<tr>
+      <td>${o.ScheduledDate ? fmtDate(o.ScheduledDate) : fmtDate(o.OrderDate)}</td>
+      <td>${o.OrderID}</td>
+      <td>${o.CustomerName}</td>
+      <td>${fields.map(f => f.FieldName).join(', ') || '—'}</td>
+      <td>${o.CropType || '—'}</td>
+      <td>${o.PilotName || '—'}</td>
+      <td>${statusBadge(o.Status)}</td>
+      <td style="text-align:right">${ac > 0 ? ac.toFixed(1) : '—'}</td>
+    </tr>`;
+  }).join('');
+
+  // ── SECTION 2: Product summary ────────────────────────────────────────────
+  // Aggregate all products across filtered orders
+  // Convert to gallons for water calculation using spray rate from template
+  const prodMap = {};
+  let totalWater = 0;
+
+  filtered.forEach(o => {
+    const tmpl = DB.templates.find(t => t.TemplateID === o.TemplateUsed);
+    const sprayRate = parseFloat(tmpl?.SprayRate || AppSettings.defaultSprayRate || 2);
+    const ac = parseFloat(o.TotalAcres || 0);
+    totalWater += ac * sprayRate;
+
+    DB.orderProds.filter(p => p.OrderID === o.OrderID).forEach(p => {
+      const key = p.ProductID || p.ProductName;
+      if (!prodMap[key]) {
+        prodMap[key] = { name: p.ProductName, unit: p.Unit, total: 0, costPerUnit: parseFloat(p.CostPerUnit||0) };
+      }
+      prodMap[key].total += parseFloat(p.TotalUnitsNeeded || 0);
+    });
+  });
+
+  const prodRows = Object.values(prodMap).map(p => {
+    const disp = fmtAmt(p.total, p.unit);
+    return `<tr>
+      <td>${p.name}</td>
+      <td style="text-align:right;font-family:var(--font-mono)">${disp}</td>
+      <td style="color:var(--text-sub)">${p.unit}/ac rate</td>
+    </tr>`;
+  }).join('');
+
+  const waterDisp = fmtAmt(totalWater, 'gallon');
+
+  // ── SECTION 3: Map of all fields ─────────────────────────────────────────
+  // Collect all field IDs for the filtered orders
+  const fieldIds = new Set();
+  filtered.forEach(o => DB.orderFields.filter(f => f.OrderID === o.OrderID).forEach(f => fieldIds.add(f.FieldID)));
+  const mapFields = [...fieldIds].map(id => DB.fields.find(f => f.FieldID === id)).filter(Boolean);
+  const hasMapData = mapFields.some(f => f.PolygonKML || (f.CentroidLat && f.CentroidLng));
+
+  el.innerHTML = `
+    <div class="report-summary-header">
+      <strong>${label}</strong>
+      ${pilotFilter ? ' · ' + (DB.pilots.find(p=>p.PilotID===pilotFilter)?.Name||'') : ''}
+      ${statusFilter ? ' · ' + statusFilter : ''}
+      · ${filtered.length} order${filtered.length!==1?'s':''} · ${totalAcres.toFixed(1)} ac total
+    </div>
+
+    <div class="report-section">
+      <div class="report-section-title">Fields to Apply</div>
+      <div style="overflow-x:auto">
+        <table class="report-table">
+          <thead><tr>
+            <th>Date</th><th>Order</th><th>Customer</th><th>Fields</th>
+            <th>Crop</th><th>Pilot</th><th>Status</th><th style="text-align:right">Acres</th>
+          </tr></thead>
+          <tbody>${fieldRows}</tbody>
+          <tfoot><tr>
+            <td colspan="7" style="font-weight:600;padding-top:0.5rem">Total</td>
+            <td style="text-align:right;font-weight:600">${totalAcres.toFixed(1)} ac</td>
+          </tr></tfoot>
+        </table>
+      </div>
+    </div>
+
+    <div class="report-section">
+      <div class="report-section-title">Products Needed</div>
+      <div style="overflow-x:auto">
+        <table class="report-table">
+          <thead><tr><th>Product</th><th style="text-align:right">Total Needed</th><th>Note</th></tr></thead>
+          <tbody>${prodRows}</tbody>
+          <tfoot><tr>
+            <td style="font-weight:600">Water (spray solution)</td>
+            <td style="text-align:right;font-weight:600">${waterDisp}</td>
+            <td style="color:var(--text-sub)">at ${AppSettings.defaultSprayRate} gal/ac avg</td>
+          </tr></tfoot>
+        </table>
+      </div>
+    </div>
+
+    ${hasMapData ? `
+    <div class="report-section">
+      <div class="report-section-title">Field Map</div>
+      <div id="reportMapContainer" class="report-map-container"></div>
+    </div>` : ''}
+  `;
+
+  // Render the field map if we have data
+  if (hasMapData) {
+    setTimeout(() => renderReportMap(mapFields, filtered), 100);
+  }
+}
+
+function renderReportMap(mapFields, orders) {
+  const container = document.getElementById('reportMapContainer');
+  if (!container) return;
+
+  // Use Leaflet for the report map
+  if (typeof L === 'undefined') { container.innerHTML = '<div class="empty-state">Map not available</div>'; return; }
+
+  // Clear any existing map
+  if (window._reportMap) { window._reportMap.remove(); window._reportMap = null; }
+
+  window._reportMap = L.map(container, { zoomControl: true });
+  L.tileLayer(
+    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    { attribution: 'Imagery © Esri', maxZoom: 19 }
+  ).addTo(window._reportMap);
+  L.tileLayer(
+    'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+    { maxZoom: 19, opacity: 0.7 }
+  ).addTo(window._reportMap);
+
+  const bounds = [];
+  mapFields.forEach(f => {
+    const order = orders.find(o => DB.orderFields.some(of => of.OrderID === o.OrderID && of.FieldID === f.FieldID));
+    const color = order?.Status === 'Completed' ? '#81C784' : order?.Status === 'Scheduled' ? '#4FC3F7' : '#FFB74D';
+
+    if (f.PolygonKML) {
+      const pts = GeoUtils.parsePolygon(f.PolygonKML);
+      if (pts && pts.length >= 3) {
+        const latlngs = pts.map(p => [p.lat, p.lng]);
+        L.polygon(latlngs, { color, weight: 2, fillColor: color, fillOpacity: 0.3 })
+          .bindTooltip(`${f.FieldName} · ${f.Acres || '?'} ac`, { permanent: false })
+          .addTo(window._reportMap);
+        latlngs.forEach(ll => bounds.push(ll));
+      }
+    } else if (f.CentroidLat && f.CentroidLng) {
+      const ll = [parseFloat(f.CentroidLat), parseFloat(f.CentroidLng)];
+      L.circleMarker(ll, { color, radius: 8, fillColor: color, fillOpacity: 0.6 })
+        .bindTooltip(`${f.FieldName} · ${f.Acres || '?'} ac`)
+        .addTo(window._reportMap);
+      bounds.push(ll);
+    }
+  });
+
+  if (bounds.length) {
+    window._reportMap.fitBounds(bounds, { padding: [30, 30] });
+  }
+}
+
 
 // ── ORDER MODAL ──────────────────────────────────────────────────────────────
 function showNewOrderModal() {

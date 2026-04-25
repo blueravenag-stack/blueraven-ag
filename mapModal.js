@@ -7,6 +7,7 @@
 window.MapModal = (() => {
 
   let map            = null;
+  let _customerFields = [];  // all customer fields shown as context
   let cluLayer       = null;
   let drawLayer      = null;
   let selectedFields = [];
@@ -26,6 +27,8 @@ window.MapModal = (() => {
     } else {
       selectedFields = [];
     }
+    // Store customer context fields for drawing (not selected, just visible)
+    _customerFields = opts.customerFields || [];
     drawPoints     = [];
     drawMode       = false;
 
@@ -48,6 +51,22 @@ window.MapModal = (() => {
         setStatus('Locating address...');
         const geo = await GeoUtils.geocodeAddress(opts.customerAddress);
         if (geo) { lat = geo.lat; lng = geo.lng; }
+      }
+
+      // Draw customer context fields first (dim, unselected)
+      if (_customerFields.length > 0) {
+        const selectedIds = new Set(selectedFields.map(f => f.id));
+        _customerFields.forEach(f => {
+          if (selectedIds.has(f.id) || !f.points || f.points.length < 3) return;
+          const poly = L.polygon(f.points.map(p => [p.lat, p.lng]), {
+            color: '#81C784', weight: 1.5, fillColor: '#81C784', fillOpacity: 0.1,
+            dashArray: '4,3'
+          }).addTo(cluLayer);
+          poly._field = { ...f };
+          poly.on('click', e => { L.DomEvent.stopPropagation(e); toggleField(poly); });
+          poly.bindTooltip(`${f.fieldName} · ${parseFloat(f.acres||0).toFixed(1)} ac`,
+            { permanent: false, direction: 'center', className: 'clu-tooltip' });
+        });
       }
 
       // Draw any preselected fields that have stored polygon points

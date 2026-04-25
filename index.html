@@ -301,11 +301,48 @@
     </div>
   </div>
   <div class="view" id="view-reports">
-    <div class="view-header"><h1 class="view-title">Reports</h1></div>
-    <div class="report-grid">
-      <div class="report-card"><h3 class="report-title">Acres Treated</h3><div id="reportAcres"></div></div>
-      <div class="report-card"><h3 class="report-title">Product Usage</h3><div id="reportProducts"></div></div>
-      <div class="report-card"><h3 class="report-title">Revenue Summary</h3><div id="reportRevenue"></div></div>
+    <div class="view-header">
+      <h1 class="view-title">Operations Report</h1>
+    </div>
+    <!-- Filter Bar -->
+    <div class="report-filters">
+      <div class="report-filter-group">
+        <label class="form-label">Date Range</label>
+        <select class="form-input" id="reportDateRange" onchange="onReportDateChange()">
+          <option value="today">Today</option>
+          <option value="tomorrow">Tomorrow</option>
+          <option value="week" selected>This Week</option>
+          <option value="next_week">Next Week</option>
+          <option value="month">This Month</option>
+          <option value="season">This Season</option>
+          <option value="custom">Custom Range</option>
+        </select>
+      </div>
+      <div class="report-filter-group" id="reportCustomDates" style="display:none">
+        <label class="form-label">From</label>
+        <input class="form-input" type="date" id="reportDateFrom" onchange="renderReports()">
+        <label class="form-label" style="margin-left:0.5rem">To</label>
+        <input class="form-input" type="date" id="reportDateTo" onchange="renderReports()">
+      </div>
+      <div class="report-filter-group">
+        <label class="form-label">Pilot</label>
+        <select class="form-input" id="reportPilot" onchange="renderReports()">
+          <option value="">All Pilots</option>
+        </select>
+      </div>
+      <div class="report-filter-group">
+        <label class="form-label">Status</label>
+        <select class="form-input" id="reportStatus" onchange="renderReports()">
+          <option value="">All</option>
+          <option value="Scheduled">Scheduled</option>
+          <option value="Open">Open</option>
+          <option value="Completed">Completed</option>
+        </select>
+      </div>
+    </div>
+
+    <div id="reportContent">
+      <div class="empty-state">Select filters above to generate report</div>
     </div>
   </div>
 
