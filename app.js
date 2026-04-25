@@ -1066,47 +1066,67 @@ function openMapForOrder() {
 }
 
 async function onMapFieldsConfirmed(mapFields, custId, custName) {
-  // Each mapField: {id, farmNum, acres, points, kml, centroid}
-  // Save each as a Field record then add to order selection
-  for (const mf of mapFields) {
-    // Check if already exists (same CLU id)
-    let existing = mf.id.startsWith('DRAWN') || mf.id.startsWith('PASTE')
-      ? null
-      : DB.fields.find(f => f.CLU_TractID === mf.id && f.CustomerID === custId);
+  // mapFields: array of {id, farmNum, acres, points, kml, centroid, fieldName, fromDB}
+  let saved = 0;
 
-    if (!existing) {
-      // Create new Field record
+  for (const mf of mapFields) {
+    // Skip preselected existing fields that are already in orderFieldsSelected
+    if (mf.fromDB && orderFieldsSelected.find(f => f.FieldID === mf.id)) continue;
+
+    // For existing DB fields (preselected), just add to selection
+    if (mf.fromDB) {
+      const existing = DB.fields.find(f => f.FieldID === mf.id);
+      if (existing && !orderFieldsSelected.find(f => f.FieldID === existing.FieldID)) {
+        orderFieldsSelected.push(existing);
+        saved++;
+      }
+      continue;
+    }
+
+    // For new fields from CLU/shapefile — prompt for a name if not already set
+    let fieldName = mf.fieldName || '';
+    if (!fieldName) {
+      const acres = parseFloat(mf.acres || 0).toFixed(1);
+      fieldName = prompt(`Name this field (${acres} ac):`, `Field ${nextId('FLD', DB.fields.map(f=>f.FieldID)).replace('FLD-','')}`) || 'New Field';
+    }
+
+    // Check if this CLU id already saved for this customer
+    const cluId = mf.id.startsWith('DRAWN') || mf.id.startsWith('PASTE') || mf.id.startsWith('EXISTING') ? '' : mf.id;
+    const alreadySaved = cluId ? DB.fields.find(f => f.CLU_TractID === cluId && f.CustomerID === custId) : null;
+
+    let field;
+    if (alreadySaved) {
+      field = alreadySaved;
+    } else {
       const ctr = mf.centroid || GeoUtils.centroid(mf.points);
       const fieldId = nextId('FLD', DB.fields.map(f => f.FieldID));
-      const suggestedName = mf.fieldName || (mf.farmNum ? `Farm ${mf.farmNum} Field ${mf.id}` : `Field ${fieldId}`);
-
-      const field = {
+      field = {
         FieldID:      fieldId,
         CustomerID:   custId,
         CustomerName: custName,
-        FieldName:    suggestedName,
-        Acres:        mf.acres,
+        FieldName:    fieldName,
+        Acres:        parseFloat(mf.acres || 0).toFixed(1),
         CentroidLat:  ctr ? ctr.lat.toFixed(6) : '',
         CentroidLng:  ctr ? ctr.lng.toFixed(6) : '',
         PolygonKML:   mf.kml || '',
-        CLU_TractID:  mf.id.startsWith('DRAWN') || mf.id.startsWith('PASTE') ? '' : mf.id,
+        CLU_TractID:  cluId,
         CLU_FarmNum:  mf.farmNum || '',
         Active:       'Yes',
         Notes:        ''
       };
       DB.fields.push(field);
       await writeRow('fields', field);
-      existing = field;
     }
 
-    // Add to order selection if not already there
-    if (!orderFieldsSelected.find(f => f.FieldID === existing.FieldID)) {
-      orderFieldsSelected.push(existing);
+    if (!orderFieldsSelected.find(f => f.FieldID === field.FieldID)) {
+      orderFieldsSelected.push(field);
+      saved++;
     }
   }
+
   saveToLocalStorage();
   renderOrderFieldsList();
-  showToast(`${mapFields.length} field${mapFields.length !== 1 ? 's' : ''} added`, 'success');
+  if (saved > 0) showToast(`${saved} field${saved !== 1 ? 's' : ''} added to order`, 'success');
 }
 
 function openMapForField() {

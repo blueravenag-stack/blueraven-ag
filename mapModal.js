@@ -394,35 +394,122 @@ window.MapModal = (() => {
     input.value = ''; // reset so same file can be reloaded
   }
 
+  // ── CLU LAYER — stored parsed data, viewport-filtered rendering ──────────────
+  let _cluData       = null;   // [{id, acres, farmNum, bbox, rings}] parsed once, kept in memory
+  let _cluLayerGroup = null;   // Leaflet layer group for CLU polygons
+  let _cluVisible    = false;  // whether CLU is currently shown
+
   async function loadShapefileZip(file) {
-    // Requires JSZip + shapefile.js (loaded in index.html)
     if (typeof JSZip === 'undefined' || typeof shapefile === 'undefined') {
       setStatus('⚠ Shapefile libraries not loaded — refresh and try again');
       return;
     }
-    setStatus('Unzipping shapefile...');
-    const zip = await JSZip.loadAsync(file);
-    
-    // Find .shp and .dbf files
-    const shpFile = Object.values(zip.files).find(f => f.name.toLowerCase().endsWith('.shp'));
-    const dbfFile = Object.values(zip.files).find(f => f.name.toLowerCase().endsWith('.dbf'));
-    
-    if (!shpFile) { setStatus('⚠ No .shp file found in zip'); return; }
-    
-    setStatus('Parsing fields...');
-    const shpBuf = await shpFile.async('arraybuffer');
-    const dbfBuf = dbfFile ? await dbfFile.async('arraybuffer') : null;
-    
-    const source = await shapefile.open(shpBuf, dbfBuf);
-    const features = [];
-    let result = await source.read();
-    while (!result.done) {
-      features.push(result.value);
-      result = await source.read();
+    setStatus('Loading shapefile — this may take a few seconds for large files...');
+
+    try {
+      const zip = await JSZip.loadAsync(file);
+      const shpFile = Object.values(zip.files).find(f => f.name.toLowerCase().endsWith('.shp'));
+      const dbfFile = Object.values(zip.files).find(f => f.name.toLowerCase().endsWith('.dbf'));
+      if (!shpFile) { setStatus('⚠ No .shp file found in zip'); return; }
+
+      setStatus('Parsing field boundaries...');
+      const shpBuf = await shpFile.async('arraybuffer');
+      const dbfBuf = dbfFile ? await dbfFile.async('arraybuffer') : null;
+
+      const source = await shapefile.open(shpBuf, dbfBuf);
+      _cluData = [];
+      let result = await source.read();
+      let count = 0;
+
+      while (!result.done) {
+        const feat = result.value;
+        const props = feat.properties || {};
+        const rings = extractRings(feat.geometry);
+        const acres_prop = parseFloat(props.Acres || props.ACRES || props.CALCACRES || 0);
+
+        rings.forEach((ring, ringIdx) => {
+          if (ring.length < 4) return;
+          // Compute bbox for viewport filtering
+          const lngs = ring.map(c => c[0]);
+          const lats = ring.map(c => c[1]);
+          const bbox = {
+            xmin: Math.min(...lngs), xmax: Math.max(...lngs),
+            ymin: Math.min(...lats), ymax: Math.max(...lats),
+          };
+          const points = ring.map(c => ({ lng: c[0], lat: c[1] }));
+          const acres  = acres_prop > 0 && rings.length === 1
+            ? acres_prop.toFixed(1)
+            : GeoUtils.calcAcres(points).toFixed(1);
+
+          if (parseFloat(acres) < 0.5) return; // skip slivers
+
+          _cluData.push({
+            id:      rings.length > 1 ? `${count}-r${ringIdx}` : `${count}`,
+            farmNum: String(props.FARMNBR || props.farm_number || ''),
+            acres,
+            bbox,
+            points,
+          });
+        });
+        count++;
+        result = await source.read();
+      }
+
+      // Attach viewport renderer to map move events
+      if (!_cluLayerGroup) {
+        _cluLayerGroup = L.featureGroup().addTo(map);
+        map.on('moveend zoomend', renderCLUViewport);
+      }
+      _cluVisible = true;
+
+      setStatus(`✓ ${_cluData.length.toLocaleString()} fields loaded — zooming to view`);
+      renderCLUViewport();
+
+    } catch(e) {
+      console.error('Shapefile load error:', e);
+      setStatus('⚠ Error loading shapefile: ' + e.message);
     }
-    
-    const geojson = { type: 'FeatureCollection', features };
-    loadGeoJSON(geojson);
+  }
+
+  function renderCLUViewport() {
+    if (!_cluData || !_cluVisible || !map || !_cluLayerGroup) return;
+    if (map.getZoom() < 12) {
+      _cluLayerGroup.clearLayers();
+      setStatus(`CLU: ${_cluData.length.toLocaleString()} fields loaded — zoom in to see boundaries`);
+      return;
+    }
+
+    const b      = map.getBounds();
+    const vxmin  = b.getWest(), vxmax  = b.getEast();
+    const vymin  = b.getSouth(), vymax = b.getNorth();
+
+    const visible = _cluData.filter(f =>
+      f.bbox.xmax >= vxmin && f.bbox.xmin <= vxmax &&
+      f.bbox.ymax >= vymin && f.bbox.ymin <= vymax
+    );
+
+    _cluLayerGroup.clearLayers();
+
+    visible.forEach(f => {
+      const isSelected = selectedFields.some(s => s.id === f.id);
+      const poly = L.polygon(f.points.map(p => [p.lat, p.lng]),
+        isSelected ? fieldStyle(true) : {
+          color: '#4DB6AC', weight: 1, fillColor: '#4DB6AC', fillOpacity: 0.1
+        }
+      ).addTo(_cluLayerGroup);
+
+      poly._field = { ...f, fromFile: true };
+      poly.on('click', e => { L.DomEvent.stopPropagation(e); toggleField(poly); });
+      poly.bindTooltip(
+        `${parseFloat(f.acres).toFixed(1)} ac${f.farmNum ? ' · Farm ' + f.farmNum : ''}`,
+        { permanent: false, direction: 'center', className: 'clu-tooltip' }
+      );
+    });
+
+    setStatus(visible.length > 0
+      ? `${visible.length} CLU field${visible.length!==1?'s':''} visible — tap to select`
+      : `No CLU fields in this view — pan to your area`
+    );
   }
 
   function loadGeoJSON(geojson) {
