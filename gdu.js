@@ -222,6 +222,13 @@ window.GDUCalc = (() => {
       // Stage estimate based on GDU
       const stage = estimateStage(currentGDU, rm);
 
+      // Data quality summary
+      const histDays  = withGDU.filter(d => !d.isForecast).length;
+      const fcstDays  = withGDU.filter(d =>  d.isForecast).length;
+      const totalDays = withGDU.length;
+      const daysSincePlant = Math.round((new Date() - new Date(plantDate + 'T12:00:00')) / 86400000);
+      const coverage  = totalDays > 0 ? Math.round(totalDays / Math.max(daysSincePlant, 1) * 100) : 0;
+
       return {
         orderId:       order.OrderID,
         customerName:  order.CustomerName,
@@ -240,8 +247,10 @@ window.GDUCalc = (() => {
         targetDate:    targetResult?.date,
         windowEnd:     windowEnd?.date,
         targetProjected: targetResult?.projected,
-        withGDU,       // full daily array for charting
+        withGDU,
         lat, lng,
+        // Data quality
+        histDays, fcstDays, totalDays, daysSincePlant, coverage,
       };
     } catch(e) {
       return { error: 'Weather fetch failed: ' + e.message, orderId: order.OrderID };

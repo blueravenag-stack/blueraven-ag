@@ -1554,7 +1554,39 @@ function renderGDUCard(r) {
     </div>
 
     <div class="gdu-status ${urgency}">${statusMsg}${r.targetProjected ? ' <span style="color:var(--text-sub);font-size:0.78rem">(*projected beyond 14-day forecast)</span>' : ''}</div>
+
+    <div class="gdu-data-quality">
+      <span>📡 ${r.histDays || 0} days historical · ${r.fcstDays || 0} days forecast · ${r.coverage || 0}% coverage</span>
+      <button class="gdu-detail-toggle" onclick="toggleGDUDetail('${r.orderId}')">▼ Daily data</button>
+    </div>
+
+    <div class="gdu-daily-table" id="gduDetail-${r.orderId}" style="display:none">
+      <table>
+        <thead><tr><th>Date</th><th>High</th><th>Low</th><th>GDU/day</th><th>Cum GDU</th><th></th></tr></thead>
+        <tbody>
+          ${(r.withGDU || []).slice(-20).map(d => `
+            <tr class="${d.isForecast ? 'forecast-row' : ''}">
+              <td>${d.date}</td>
+              <td>${d.maxF != null ? d.maxF.toFixed(1) + '°' : '—'}</td>
+              <td>${d.minF != null ? d.minF.toFixed(1) + '°' : '—'}</td>
+              <td>${d.dailyGDU != null ? d.dailyGDU.toFixed(1) : '—'}</td>
+              <td>${d.cumGDU != null ? Math.round(d.cumGDU) : '—'}</td>
+              <td style="color:var(--text-sub);font-size:0.7rem">${d.isForecast ? 'fcst' : ''}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+      ${(r.withGDU || []).length > 20 ? `<div style="color:var(--text-sub);font-size:0.75rem;padding:0.4rem">Showing last 20 of ${r.withGDU.length} days</div>` : ''}
+    </div>
   </div>`;
+}
+
+function toggleGDUDetail(orderId) {
+  const el = document.getElementById('gduDetail-' + orderId);
+  const btn = el?.previousElementSibling?.querySelector('.gdu-detail-toggle');
+  if (!el) return;
+  const show = el.style.display === 'none';
+  el.style.display = show ? 'block' : 'none';
+  if (btn) btn.textContent = show ? '▲ Daily data' : '▼ Daily data';
 }
 
 async function setGDUScheduledDate(orderId, date) {
