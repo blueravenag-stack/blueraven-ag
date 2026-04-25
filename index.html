@@ -577,8 +577,9 @@
     <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap">
       <button class="btn-secondary" id="mapDrawBtn" onclick="MapModal.toggleDraw()">✏ Draw Field</button>
       <button class="btn-secondary" id="mapFinishBtn" onclick="MapModal.finishDrawBtn()" style="display:none">✓ Finish</button>
-      <label class="btn-secondary" style="cursor:pointer" title="Load CLU shapefile (.zip) or GeoJSON">
-        📂 Load CLU File
+      <button class="btn-secondary" id="mapCLUBtn" onclick="MapModal.toggleCLU()" title="Load CLU boundaries for Greene, Jersey, Macoupin, Madison counties">🌾 Show CLU Fields</button>
+      <label class="btn-secondary" style="cursor:pointer" title="Load any shapefile (.zip) or GeoJSON">
+        📂 Load File
         <input type="file" accept=".zip,.geojson,.json" style="display:none" onchange="MapModal.loadShapefileInput(this)">
       </label>
       <button class="btn-secondary" onclick="MapModal.showPastePanel(true)">📋 Paste KML</button>

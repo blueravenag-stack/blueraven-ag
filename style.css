@@ -835,3 +835,6 @@ body.light .leaflet-container { background: #e8e8e8; }
   white-space: nowrap; pointer-events: none;
 }
 .gdu-daily-table .window-row { background: rgba(255,183,77,0.08); }
+
+/* ── CLU toggle button ── */
+#mapCLUBtn.active { background: rgba(77,182,172,0.15); border-color: #4DB6AC; color: #4DB6AC; }

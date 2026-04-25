@@ -1066,67 +1066,76 @@ function openMapForOrder() {
 }
 
 async function onMapFieldsConfirmed(mapFields, custId, custName) {
-  // mapFields: array of {id, farmNum, acres, points, kml, centroid, fieldName, fromDB}
-  let saved = 0;
+  // mapFields: [{id, farmNum, acres, points, kml, centroid, fieldName, fromDB}]
+  // Save each as a permanent Field record, then add to order selection.
+  // NO prompts — fields get auto-named; user can rename via Edit Field later.
+
+  let added = 0;
 
   for (const mf of mapFields) {
-    // Skip preselected existing fields that are already in orderFieldsSelected
-    if (mf.fromDB && orderFieldsSelected.find(f => f.FieldID === mf.id)) continue;
 
-    // For existing DB fields (preselected), just add to selection
+    // ── Preselected existing DB fields ──────────────────────────────────────
     if (mf.fromDB) {
-      const existing = DB.fields.find(f => f.FieldID === mf.id);
-      if (existing && !orderFieldsSelected.find(f => f.FieldID === existing.FieldID)) {
-        orderFieldsSelected.push(existing);
-        saved++;
+      const dbField = DB.fields.find(f => f.FieldID === mf.id);
+      if (dbField && !orderFieldsSelected.find(f => f.FieldID === dbField.FieldID)) {
+        orderFieldsSelected.push(dbField);
+        added++;
       }
       continue;
     }
 
-    // For new fields from CLU/shapefile — prompt for a name if not already set
-    let fieldName = mf.fieldName || '';
-    if (!fieldName) {
-      const acres = parseFloat(mf.acres || 0).toFixed(1);
-      fieldName = prompt(`Name this field (${acres} ac):`, `Field ${nextId('FLD', DB.fields.map(f=>f.FieldID)).replace('FLD-','')}`) || 'New Field';
-    }
+    // ── New field (drawn, pasted, or loaded from shapefile/CLU) ─────────────
+    // Determine a stable CLU id for dedup (blank for drawn/pasted/existing)
+    const isEphemeral = ['DRAWN-','PASTE-','EXISTING-'].some(p => mf.id.startsWith(p));
+    const cluId = isEphemeral ? '' : mf.id;
 
-    // Check if this CLU id already saved for this customer
-    const cluId = mf.id.startsWith('DRAWN') || mf.id.startsWith('PASTE') || mf.id.startsWith('EXISTING') ? '' : mf.id;
-    const alreadySaved = cluId ? DB.fields.find(f => f.CLU_TractID === cluId && f.CustomerID === custId) : null;
+    // Check if already saved for this customer (same CLU id)
+    let field = cluId
+      ? DB.fields.find(f => f.CLU_TractID === cluId && f.CustomerID === custId)
+      : null;
 
-    let field;
-    if (alreadySaved) {
-      field = alreadySaved;
-    } else {
-      const ctr = mf.centroid || GeoUtils.centroid(mf.points);
+    if (!field) {
+      // Auto-generate a name the user can rename later
       const fieldId = nextId('FLD', DB.fields.map(f => f.FieldID));
+      const acres   = parseFloat(mf.acres || 0).toFixed(1);
+      const name    = mf.fieldName ||
+                      (mf.farmNum ? `Farm ${mf.farmNum}` : `Field ${fieldId}`) +
+                      ` (${acres} ac)`;
+      const ctr = mf.centroid || GeoUtils.centroid(mf.points || []);
+
       field = {
         FieldID:      fieldId,
         CustomerID:   custId,
         CustomerName: custName,
-        FieldName:    fieldName,
-        Acres:        parseFloat(mf.acres || 0).toFixed(1),
+        FieldName:    name,
+        Acres:        acres,
         CentroidLat:  ctr ? ctr.lat.toFixed(6) : '',
         CentroidLng:  ctr ? ctr.lng.toFixed(6) : '',
         PolygonKML:   mf.kml || '',
         CLU_TractID:  cluId,
         CLU_FarmNum:  mf.farmNum || '',
         Active:       'Yes',
-        Notes:        ''
+        Notes:        '',
       };
       DB.fields.push(field);
       await writeRow('fields', field);
     }
 
+    // Add to order selection if not already there
     if (!orderFieldsSelected.find(f => f.FieldID === field.FieldID)) {
       orderFieldsSelected.push(field);
-      saved++;
+      added++;
     }
   }
 
   saveToLocalStorage();
   renderOrderFieldsList();
-  if (saved > 0) showToast(`${saved} field${saved !== 1 ? 's' : ''} added to order`, 'success');
+  showToast(
+    added > 0
+      ? `${added} field${added !== 1 ? 's' : ''} added — tap a chip to rename`
+      : 'Fields already in order',
+    'success'
+  );
 }
 
 function openMapForField() {

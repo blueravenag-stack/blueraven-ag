@@ -464,6 +464,15 @@ window.MapModal = (() => {
 
       setStatus(`✓ ${_cluData.length.toLocaleString()} fields loaded — zooming to view`);
       renderCLUViewport();
+      // Fit map to the full extent of loaded data
+      try {
+        const allLats = _cluData.flatMap(f => [f.bbox.ymin, f.bbox.ymax]);
+        const allLngs = _cluData.flatMap(f => [f.bbox.xmin, f.bbox.xmax]);
+        map.fitBounds([
+          [Math.min(...allLats), Math.min(...allLngs)],
+          [Math.max(...allLats), Math.max(...allLngs)]
+        ], { padding: [30, 30] });
+      } catch(e) {}
 
     } catch(e) {
       console.error('Shapefile load error:', e);
@@ -586,7 +595,57 @@ window.MapModal = (() => {
     return [];
   }
 
+
+  // ── GITHUB CLU TOGGLE ──────────────────────────────────────────────────────
+  // Fetches the CLU zip from GitHub repo, parses once, shows viewport-filtered
+  let _cluLoaded     = false;
+  let _cluLoadingNow = false;
+
+  async function toggleCLU() {
+    const btn = document.getElementById('mapCLUBtn');
+
+    if (_cluVisible && _cluData) {
+      // Turn OFF
+      _cluVisible = false;
+      if (_cluLayerGroup) _cluLayerGroup.clearLayers();
+      if (btn) { btn.textContent = '🌾 Show CLU Fields'; btn.classList.remove('active'); }
+      setStatus('CLU boundaries hidden — click Show CLU Fields to reload');
+      return;
+    }
+
+    if (_cluData) {
+      // Already parsed — just re-enable
+      _cluVisible = true;
+      renderCLUViewport();
+      if (btn) { btn.textContent = '🌾 Hide CLU Fields'; btn.classList.add('active'); }
+      return;
+    }
+
+    if (_cluLoadingNow) return;
+    _cluLoadingNow = true;
+    if (btn) { btn.textContent = '⏳ Loading CLU...'; btn.disabled = true; }
+    setStatus('Fetching CLU boundaries from GitHub...');
+
+    // URL to the CLU zip stored in the GitHub repo
+    const CLU_URL = 'IL_ACPF_Greene_Jersey_Macoupin_Madison.zip';
+
+    try {
+      const res = await fetch(CLU_URL);
+      if (!res.ok) throw new Error(`HTTP ${res.status} — make sure IL_ACPF_Greene_Jersey_Macoupin_Madison.zip is in your GitHub repo root`);
+      const arrayBuf = await res.arrayBuffer();
+      const blob = new Blob([arrayBuf], { type: 'application/zip' });
+      const file = new File([blob], 'clu.zip');
+      await loadShapefileZip(file);
+      _cluVisible = true;
+      if (btn) { btn.textContent = '🌾 Hide CLU Fields'; btn.classList.remove('active'); btn.disabled = false; btn.classList.add('active'); }
+    } catch(e) {
+      setStatus('⚠ CLU load failed: ' + e.message);
+      if (btn) { btn.textContent = '🌾 Show CLU Fields'; btn.disabled = false; }
+    }
+    _cluLoadingNow = false;
+  }
+
   // ── PUBLIC ────────────────────────────────────────────────────────────────
-  return { open, close, confirm, toggleDraw, finishDrawBtn, removeSelected, showPastePanel, applyPastedKML, searchAddress, loadShapefileInput };
+  return { open, close, confirm, toggleDraw, finishDrawBtn, removeSelected, showPastePanel, applyPastedKML, searchAddress, loadShapefileInput, toggleCLU };
 
 })();
