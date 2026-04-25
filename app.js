@@ -873,7 +873,7 @@ async function saveField() {
   if (!custId) { showToast('Please select a customer', 'error'); return; }
   if (!name)   { showToast('Field name is required', 'error'); return; }
 
-  const fieldId = editId || 'FLD-' + String(DB.fields.length + 1).padStart(3, '0');
+  const fieldId = editId || nextId('FLD', DB.fields.map(f => f.FieldID));
   const field = {
     FieldID: fieldId, CustomerID: custId, CustomerName: custName,
     FieldName: name,

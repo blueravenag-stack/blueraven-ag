@@ -334,8 +334,10 @@ window.MapModal = (() => {
   // ── CONFIRM ───────────────────────────────────────────────────────────────
   function confirm() {
     if (!selectedFields.length) return;
+    console.log('[MapModal.confirm] selectedFields count:', selectedFields.length,
+      selectedFields.map(f => ({id:f.id, acres:f.acres, hasPoints:!!(f.points?.length)})));
     if (onConfirmCb) {
-      onConfirmCb(selectedFields.map(f => ({
+      const payload = selectedFields.map(f => ({
         id:        f.id,
         farmNum:   f.farmNum || '',
         acres:     f.acres,
@@ -343,7 +345,9 @@ window.MapModal = (() => {
         kml:       GeoUtils.pointsToKML(f.points),
         centroid:  GeoUtils.centroid(f.points),
         fieldName: f.fieldName || ''
-      })));
+      }));
+      console.log('[MapModal.confirm] payload count:', payload.length);
+      onConfirmCb(payload);
     }
     close();
   }
@@ -669,54 +673,59 @@ window.MapModal = (() => {
   let _editingField  = null;  // {fieldId, poly, originalPoints}
   let _editMarkers   = [];    // vertex drag markers
 
-  function enterEditMode(poly) {
-    if (_editingField) exitEditMode(true); // save previous edit first
+  function vertexIcon() {
+    return L.divIcon({
+      className: '',
+      html: '<div style="width:14px;height:14px;background:#FFB74D;border:2px solid #fff;border-radius:50%;cursor:grab;box-shadow:0 1px 3px rgba(0,0,0,0.4)"></div>',
+      iconSize: [14, 14],
+      iconAnchor: [7, 7],
+    });
+  }
 
-    const f = poly._field;
-    _editingField = { id: f.id, poly, originalPoints: [...f.points] };
-    poly.setStyle({ color: '#FFB74D', weight: 3, fillColor: '#FFB74D', fillOpacity: 0.2 });
+  function makeVertexMarker(ll, poly) {
+    const marker = L.marker(ll, {
+      icon:      vertexIcon(),
+      draggable: true,
+      autoPan:   true,
+      bubblingMouseEvents: false,
+    }).addTo(map);
 
-    // Place draggable markers at each vertex
-    const latlngs = poly.getLatLngs()[0];
-    _editMarkers = latlngs.map((ll, i) => {
-      const marker = L.circleMarker(ll, {
-        radius: 7, color: '#fff', weight: 2,
-        fillColor: '#FFB74D', fillOpacity: 1,
-        draggable: true, bubblingMouseEvents: false
-      }).addTo(map);
-
-      // On drag: update the polygon shape
-      marker.on('drag', (e) => {
-        const newLatlngs = _editMarkers.map((m, j) =>
-          j === i ? e.target.getLatLng() : m.getLatLng()
-        );
-        poly.setLatLngs([newLatlngs]);
-      });
-
-      // On right-click: delete this vertex
-      marker.on('contextmenu', (e) => {
-        L.DomEvent.stopPropagation(e);
-        if (_editMarkers.length <= 4) {
-          setStatus('⚠ Polygon must have at least 3 points');
-          return;
-        }
-        const idx = _editMarkers.indexOf(marker);
-        _editMarkers.splice(idx, 1);
-        map.removeLayer(marker);
-        const newLatlngs = _editMarkers.map(m => m.getLatLng());
-        poly.setLatLngs([newLatlngs]);
-      });
-
-      return marker;
+    marker.on('drag', () => {
+      const latlngs = _editMarkers.map(m => m.getLatLng());
+      poly.setLatLngs([latlngs]);
     });
 
-    // Show finish button
-    document.getElementById('mapEditFinishBtn')?.style.setProperty('display', 'inline-flex');
-    setStatus('Editing polygon — drag vertices to adjust · right-click vertex to delete · click map to add point · click Finish when done');
+    marker.on('contextmenu', (e) => {
+      L.DomEvent.stopPropagation(e);
+      if (_editMarkers.length <= 4) { setStatus('⚠ Need at least 3 points'); return; }
+      const idx = _editMarkers.indexOf(marker);
+      _editMarkers.splice(idx, 1);
+      map.removeLayer(marker);
+      poly.setLatLngs([_editMarkers.map(m => m.getLatLng())]);
+    });
 
-    // Click on polygon perimeter to add a new vertex
+    return marker;
+  }
+
+  function enterEditMode(poly) {
+    if (_editingField) exitEditMode(true);
+
+    const f = poly._field;
+    const latlngs = poly.getLatLngs()[0] || [];
+    _editingField = {
+      id: f.id,
+      poly,
+      originalPoints: latlngs.map(ll => ({ lat: ll.lat, lng: ll.lng }))
+    };
+    poly.setStyle({ color: '#FFB74D', weight: 3, fillColor: '#FFB74D', fillOpacity: 0.2 });
+
+    _editMarkers = latlngs.map(ll => makeVertexMarker(ll, poly));
+
+    document.getElementById('mapEditFinishBtn')?.style.setProperty('display', 'inline-flex');
+    setStatus('Edit mode: drag vertices · right-click to delete · tap edge to add · Finish Edit when done');
+
     poly.on('click', onPolygonEditClick);
-    map.off('click', onMapClick); // disable draw mode click handler temporarily
+    map.off('click', onMapClick);
   }
 
   function onPolygonEditClick(e) {
@@ -732,25 +741,8 @@ window.MapModal = (() => {
       if (d < minDist) { minDist = d; insertAt = i+1; }
     }
 
-    // Create new marker
-    const newMarker = L.circleMarker(ll, {
-      radius: 7, color: '#fff', weight: 2,
-      fillColor: '#FFB74D', fillOpacity: 1
-    }).addTo(map);
-
-    const newIdx = insertAt;
-    newMarker.on('drag', (e) => {
-      const all = _editMarkers.map((m, j) => j === newIdx ? e.target.getLatLng() : m.getLatLng());
-      _editingField.poly.setLatLngs([all]);
-    });
-    newMarker.on('contextmenu', (e) => {
-      L.DomEvent.stopPropagation(e);
-      if (_editMarkers.length <= 4) return;
-      const idx = _editMarkers.indexOf(newMarker);
-      _editMarkers.splice(idx, 1);
-      map.removeLayer(newMarker);
-      _editingField.poly.setLatLngs([_editMarkers.map(m => m.getLatLng())]);
-    });
+    // Create new draggable vertex marker
+    const newMarker = makeVertexMarker(ll, _editingField.poly);
     _editMarkers.splice(insertAt, 0, newMarker);
     _editingField.poly.setLatLngs([_editMarkers.map(m => m.getLatLng())]);
   }
