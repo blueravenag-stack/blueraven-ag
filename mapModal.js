@@ -686,20 +686,32 @@ window.MapModal = (() => {
     const marker = L.marker(ll, {
       icon:      vertexIcon(),
       draggable: true,
-      autoPan:   true,
+      autoPan:   false,
       bubblingMouseEvents: false,
+      zIndexOffset: 1000,
     }).addTo(map);
 
     marker.on('drag', () => {
-      const latlngs = _editMarkers.map(m => m.getLatLng());
-      poly.setLatLngs([latlngs]);
+      poly.setLatLngs([_editMarkers.map(m => m.getLatLng())]);
     });
 
+    // Double-click vertex to delete it
+    marker.on('dblclick', (e) => {
+      L.DomEvent.stopPropagation(e);
+      if (_editMarkers.length <= 4) { setStatus('⚠ Need at least 3 points'); return; }
+      const i = _editMarkers.indexOf(marker);
+      _editMarkers.splice(i, 1);
+      map.removeLayer(marker);
+      poly.setLatLngs([_editMarkers.map(m => m.getLatLng())]);
+      setStatus('Vertex deleted — double-click another to remove, click edge to add');
+    });
+
+    // Right-click also deletes (desktop)
     marker.on('contextmenu', (e) => {
       L.DomEvent.stopPropagation(e);
       if (_editMarkers.length <= 4) { setStatus('⚠ Need at least 3 points'); return; }
-      const idx = _editMarkers.indexOf(marker);
-      _editMarkers.splice(idx, 1);
+      const i = _editMarkers.indexOf(marker);
+      _editMarkers.splice(i, 1);
       map.removeLayer(marker);
       poly.setLatLngs([_editMarkers.map(m => m.getLatLng())]);
     });
@@ -728,9 +740,9 @@ window.MapModal = (() => {
     map.off('click', onMapClick);
   }
 
-  function onPolygonEditClick(e) {
-    L.DomEvent.stopPropagation(e);
-    // Add a new vertex at the clicked point
+  function onEditMapClick(e) {
+    if (!_editingField) return;
+    // Add a new vertex if click is near the polygon edge
     const ll = e.latlng;
     // Find the closest edge to insert the new point
     const latlngs = _editMarkers.map(m => m.getLatLng());
@@ -741,10 +753,23 @@ window.MapModal = (() => {
       if (d < minDist) { minDist = d; insertAt = i+1; }
     }
 
-    // Create new draggable vertex marker
-    const newMarker = makeVertexMarker(ll, _editingField.poly);
+    // Only add vertex if click is reasonably close to the polygon edge
+    // (within ~20 pixels at current zoom)
+    const poly = _editingField.poly;
+    const edgePts = _editMarkers.map(m => m.getLatLng());
+    let minDist = Infinity;
+    for (let i = 0; i < edgePts.length; i++) {
+      const a = edgePts[i], b = edgePts[(i+1) % edgePts.length];
+      minDist = Math.min(minDist, pointToSegmentDist(ll, a, b));
+    }
+    // Convert pixel threshold to meters at current zoom
+    const metersPerPixel = 40075016.686 * Math.cos(ll.lat * Math.PI/180) / Math.pow(2, map.getZoom() + 8);
+    if (minDist > metersPerPixel * 20) return; // click too far from edge
+
+    const newMarker = makeVertexMarker(ll, poly);
     _editMarkers.splice(insertAt, 0, newMarker);
-    _editingField.poly.setLatLngs([_editMarkers.map(m => m.getLatLng())]);
+    poly.setLatLngs([_editMarkers.map(m => m.getLatLng())]);
+    setStatus('Vertex added — drag to adjust · dbl-click to remove');
   }
 
   function pointToSegmentDist(p, a, b) {
@@ -777,7 +802,7 @@ window.MapModal = (() => {
 
     _editMarkers.forEach(m => map.removeLayer(m));
     _editMarkers = [];
-    poly.off('click', onPolygonEditClick);
+    map.off('click', onEditMapClick);
     map.on('click', onMapClick);
     _editingField = null;
     document.getElementById('mapEditFinishBtn')?.style.setProperty('display', 'none');

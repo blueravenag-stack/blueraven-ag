@@ -2136,31 +2136,37 @@ async function saveOrder() {
 
 // ── WRITE TO SHEET ───────────────────────────────────────────────────────────
 async function writeRow(table, data) {
-  // Use GET for small payloads, POST (text/plain) for large ones (e.g. KML polygons).
-  // GAS accepts both via doGet and doPost reading e.postData.contents.
+  // Fields always contain KML polygons — always use POST to avoid URL length issues.
+  // All other tables use GET (small payloads, more reliable response handling).
+  const usePost = (table === 'fields');
   try {
-    const body    = JSON.stringify(data);
-    const encoded = encodeURIComponent(body);
-    const getUrl  = `${GAS_URL}?action=write&table=${table}&data=${encoded}`;
-
-    let res;
-    if (getUrl.length > 4000) {
-      // Large payload — use POST with text/plain to avoid CORS preflight
-      res = await fetch(GAS_URL, {
+    if (usePost) {
+      await fetch(GAS_URL, {
         method:  'POST',
         mode:    'no-cors',
         headers: { 'Content-Type': 'text/plain' },
         body:    JSON.stringify({ action: 'write', table, data }),
       });
-      // no-cors returns opaque response — assume success
-      console.log('Write POST (large):', table, data[Object.keys(data)[0]]);
+      console.log('Write POST:', table, data[Object.keys(data)[0]]);
       return;
     }
-
-    res = await fetch(getUrl);
+    // GET for all non-field tables
+    const encoded = encodeURIComponent(JSON.stringify(data));
+    const getUrl  = `${GAS_URL}?action=write&table=${table}&data=${encoded}`;
+    if (getUrl.length > 6000) {
+      // Safety fallback: very large non-field payload
+      await fetch(GAS_URL, {
+        method: 'POST', mode: 'no-cors',
+        headers: { 'Content-Type': 'text/plain' },
+        body: JSON.stringify({ action: 'write', table, data }),
+      });
+      console.log('Write POST (fallback):', table, data[Object.keys(data)[0]]);
+      return;
+    }
+    const res    = await fetch(getUrl);
     const result = await res.json();
     if (result.error) console.warn('Write error:', result.error);
-    else console.log('Write OK:', result.action, table);
+    else console.log('Write OK:', result.action, table, data[Object.keys(data)[0]]);
   } catch(e) {
     console.warn('Write failed:', e.message);
   }
