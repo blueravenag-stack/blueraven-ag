@@ -445,6 +445,7 @@ window.MapModal = (() => {
       // Outer ring determination: positive signed area = CCW (standard GeoJSON)
       // We treat ALL rings as potential fields since CLU exports pack separate
       // fields as multiple parts in a single shape record
+      console.log(`Feature ${featIdx}: ${rings.length} rings`);
       rings.forEach((ring, ringIdx) => {
         if (ring.length < 4) return; // need at least 3 unique points + closure
 
@@ -475,7 +476,7 @@ window.MapModal = (() => {
 
     if (count > 0) {
       try { map.fitBounds(cluLayer.getBounds(), { padding: [20,20] }); } catch(e) {}
-      setStatus(`${count} field${count!==1?'s':''} loaded — tap to select`);
+      setStatus(`${count} field${count!==1?'s':''} loaded from ${features.length} shape record${features.length!==1?'s':''} — tap to select`);
     } else {
       setStatus('⚠ No valid field polygons found in file');
     }
