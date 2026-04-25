@@ -155,15 +155,16 @@ window.MapModal = (() => {
 
   function toggleField(poly) {
     if (drawMode) return;
+    if (_editingField) { exitEditMode(true); return; }
     const f   = poly._field;
     const idx = selectedFields.findIndex(s => s.id === f.id);
     if (idx > -1) {
-      selectedFields.splice(idx, 1);
-      poly.setStyle(fieldStyle(false));
-    } else {
-      selectedFields.push({ ...f, polygon: poly });
-      poly.setStyle(fieldStyle(true));
+      // Already selected — enter edit mode on second click
+      enterEditMode(poly);
+      return;
     }
+    selectedFields.push({ ...f, polygon: poly });
+    poly.setStyle(fieldStyle(true));
     updateSelectedPanel();
   }
 
@@ -464,17 +465,30 @@ window.MapModal = (() => {
       }
       _cluVisible = true;
 
-      setStatus(`✓ ${_cluData.length.toLocaleString()} fields loaded — zooming to view`);
-      renderCLUViewport();
-      // Fit map to the full extent of loaded data
-      try {
-        const allLats = _cluData.flatMap(f => [f.bbox.ymin, f.bbox.ymax]);
-        const allLngs = _cluData.flatMap(f => [f.bbox.xmin, f.bbox.xmax]);
-        map.fitBounds([
-          [Math.min(...allLats), Math.min(...allLngs)],
-          [Math.max(...allLats), Math.max(...allLngs)]
-        ], { padding: [30, 30] });
-      } catch(e) {}
+      if (_cluData.length <= 200) {
+        // Small file: show all polygons directly via loadGeoJSON (no viewport filter)
+        const features = _cluData.map(f => ({
+          type: 'Feature',
+          geometry: { type: 'Polygon', coordinates: [f.points.map(p => [p.lng, p.lat])] },
+          properties: { FARMNBR: f.farmNum, CALCACRES: f.acres }
+        }));
+        _cluData = [];   // clear so we don't confuse viewport renderer
+        _cluLayerGroup?.clearLayers();
+        loadGeoJSON({ type: 'FeatureCollection', features });
+      } else {
+        // Large file: viewport-filtered rendering
+        setStatus(`✓ ${_cluData.length.toLocaleString()} fields loaded — zooming to view`);
+        renderCLUViewport();
+        // Fit map to full extent
+        try {
+          const allLats = _cluData.flatMap(f => [f.bbox.ymin, f.bbox.ymax]);
+          const allLngs = _cluData.flatMap(f => [f.bbox.xmin, f.bbox.xmax]);
+          map.fitBounds([
+            [Math.min(...allLats), Math.min(...allLngs)],
+            [Math.max(...allLats), Math.max(...allLngs)]
+          ], { padding: [30, 30] });
+        } catch(e) {}
+      }
 
     } catch(e) {
       console.error('Shapefile load error:', e);
@@ -615,8 +629,8 @@ window.MapModal = (() => {
       return;
     }
 
-    if (_cluData) {
-      // Already parsed — just re-enable
+    if (_cluData && _cluData.length > 0) {
+      // Already parsed — just re-enable in current view
       _cluVisible = true;
       renderCLUViewport();
       if (btn) { btn.textContent = '🌾 Hide CLU Fields'; btn.classList.add('active'); }
@@ -647,7 +661,139 @@ window.MapModal = (() => {
     _cluLoadingNow = false;
   }
 
+
+  // ── POLYGON EDITING ────────────────────────────────────────────────────────
+  // Click a SELECTED field again to enter vertex-edit mode.
+  // Drag vertices to adjust. Click elsewhere to finish.
+
+  let _editingField  = null;  // {fieldId, poly, originalPoints}
+  let _editMarkers   = [];    // vertex drag markers
+
+  function enterEditMode(poly) {
+    if (_editingField) exitEditMode(true); // save previous edit first
+
+    const f = poly._field;
+    _editingField = { id: f.id, poly, originalPoints: [...f.points] };
+    poly.setStyle({ color: '#FFB74D', weight: 3, fillColor: '#FFB74D', fillOpacity: 0.2 });
+
+    // Place draggable markers at each vertex
+    const latlngs = poly.getLatLngs()[0];
+    _editMarkers = latlngs.map((ll, i) => {
+      const marker = L.circleMarker(ll, {
+        radius: 7, color: '#fff', weight: 2,
+        fillColor: '#FFB74D', fillOpacity: 1,
+        draggable: true, bubblingMouseEvents: false
+      }).addTo(map);
+
+      // On drag: update the polygon shape
+      marker.on('drag', (e) => {
+        const newLatlngs = _editMarkers.map((m, j) =>
+          j === i ? e.target.getLatLng() : m.getLatLng()
+        );
+        poly.setLatLngs([newLatlngs]);
+      });
+
+      // On right-click: delete this vertex
+      marker.on('contextmenu', (e) => {
+        L.DomEvent.stopPropagation(e);
+        if (_editMarkers.length <= 4) {
+          setStatus('⚠ Polygon must have at least 3 points');
+          return;
+        }
+        const idx = _editMarkers.indexOf(marker);
+        _editMarkers.splice(idx, 1);
+        map.removeLayer(marker);
+        const newLatlngs = _editMarkers.map(m => m.getLatLng());
+        poly.setLatLngs([newLatlngs]);
+      });
+
+      return marker;
+    });
+
+    // Show finish button
+    document.getElementById('mapEditFinishBtn')?.style.setProperty('display', 'inline-flex');
+    setStatus('Editing polygon — drag vertices to adjust · right-click vertex to delete · click map to add point · click Finish when done');
+
+    // Click on polygon perimeter to add a new vertex
+    poly.on('click', onPolygonEditClick);
+    map.off('click', onMapClick); // disable draw mode click handler temporarily
+  }
+
+  function onPolygonEditClick(e) {
+    L.DomEvent.stopPropagation(e);
+    // Add a new vertex at the clicked point
+    const ll = e.latlng;
+    // Find the closest edge to insert the new point
+    const latlngs = _editMarkers.map(m => m.getLatLng());
+    let minDist = Infinity, insertAt = latlngs.length;
+    for (let i = 0; i < latlngs.length; i++) {
+      const a = latlngs[i], b = latlngs[(i+1) % latlngs.length];
+      const d = pointToSegmentDist(ll, a, b);
+      if (d < minDist) { minDist = d; insertAt = i+1; }
+    }
+
+    // Create new marker
+    const newMarker = L.circleMarker(ll, {
+      radius: 7, color: '#fff', weight: 2,
+      fillColor: '#FFB74D', fillOpacity: 1
+    }).addTo(map);
+
+    const newIdx = insertAt;
+    newMarker.on('drag', (e) => {
+      const all = _editMarkers.map((m, j) => j === newIdx ? e.target.getLatLng() : m.getLatLng());
+      _editingField.poly.setLatLngs([all]);
+    });
+    newMarker.on('contextmenu', (e) => {
+      L.DomEvent.stopPropagation(e);
+      if (_editMarkers.length <= 4) return;
+      const idx = _editMarkers.indexOf(newMarker);
+      _editMarkers.splice(idx, 1);
+      map.removeLayer(newMarker);
+      _editingField.poly.setLatLngs([_editMarkers.map(m => m.getLatLng())]);
+    });
+    _editMarkers.splice(insertAt, 0, newMarker);
+    _editingField.poly.setLatLngs([_editMarkers.map(m => m.getLatLng())]);
+  }
+
+  function pointToSegmentDist(p, a, b) {
+    const dx = b.lng - a.lng, dy = b.lat - a.lat;
+    if (dx === 0 && dy === 0) return p.distanceTo(a);
+    const t = Math.max(0, Math.min(1, ((p.lng-a.lng)*dx + (p.lat-a.lat)*dy) / (dx*dx+dy*dy)));
+    return p.distanceTo(L.latLng(a.lat+t*dy, a.lng+t*dx));
+  }
+
+  function exitEditMode(save) {
+    if (!_editingField) return;
+    const { id, poly } = _editingField;
+
+    if (save && _editMarkers.length >= 3) {
+      // Update the field's points from current marker positions
+      const newLatlngs = _editMarkers.map(m => m.getLatLng());
+      const newPoints  = newLatlngs.map(ll => ({ lat: ll.lat, lng: ll.lng }));
+      poly._field.points = newPoints;
+      // Re-style as selected
+      poly.setStyle(fieldStyle(true));
+      // Update selectedFields entry
+      const sf = selectedFields.find(s => s.id === id);
+      if (sf) sf.points = newPoints;
+      setStatus('Polygon updated — confirm to save changes');
+    } else {
+      // Restore original
+      poly.setLatLngs([_editingField.originalPoints.map(p => [p.lat, p.lng])]);
+      poly.setStyle(fieldStyle(true));
+    }
+
+    _editMarkers.forEach(m => map.removeLayer(m));
+    _editMarkers = [];
+    poly.off('click', onPolygonEditClick);
+    map.on('click', onMapClick);
+    _editingField = null;
+    document.getElementById('mapEditFinishBtn')?.style.setProperty('display', 'none');
+  }
+
+  function toggleEditMode() { exitEditMode(true); }
+
   // ── PUBLIC ────────────────────────────────────────────────────────────────
-  return { open, close, confirm, toggleDraw, finishDrawBtn, removeSelected, showPastePanel, applyPastedKML, searchAddress, loadShapefileInput, toggleCLU };
+  return { open, close, confirm, toggleDraw, finishDrawBtn, removeSelected, showPastePanel, applyPastedKML, searchAddress, loadShapefileInput, toggleCLU, toggleEditMode };
 
 })();

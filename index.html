@@ -576,7 +576,8 @@
     <h2 class="modal-title">Select Fields</h2>
     <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap">
       <button class="btn-secondary" id="mapDrawBtn" onclick="MapModal.toggleDraw()">✏ Draw Field</button>
-      <button class="btn-secondary" id="mapFinishBtn" onclick="MapModal.finishDrawBtn()" style="display:none">✓ Finish</button>
+      <button class="btn-secondary" id="mapFinishBtn" onclick="MapModal.finishDrawBtn()" style="display:none">✓ Finish Draw</button>
+      <button class="btn-secondary" id="mapEditFinishBtn" onclick="MapModal.toggleEditMode()" style="display:none;border-color:var(--warn);color:var(--warn)">✓ Finish Edit</button>
       <button class="btn-secondary" id="mapCLUBtn" onclick="MapModal.toggleCLU()" title="Load CLU boundaries for Greene, Jersey, Macoupin, Madison counties">🌾 Show CLU Fields</button>
       <label class="btn-secondary" style="cursor:pointer" title="Load any shapefile (.zip) or GeoJSON">
         📂 Load File

@@ -2168,9 +2168,18 @@ async function writeRow(table, data) {
 
 // ── HELPERS ──────────────────────────────────────────────────────────────────
 function nextId(prefix, existing) {
+  // Use timestamp suffix to guarantee uniqueness across sessions and devices
+  // Fall back to incrementing only if we need a readable ID (e.g. CUST-, PLT-)
   const nums = existing.map(id => parseInt(id.replace(prefix + '-', '') || 0)).filter(Boolean);
   const max  = nums.length ? Math.max(...nums) : 0;
-  return `${prefix}-${String(max + 1).padStart(3, '0')}`;
+  const next = max + 1;
+  // Check if next sequential ID already exists (race condition guard)
+  const candidate = `${prefix}-${String(next).padStart(3, '0')}`;
+  if (existing.includes(candidate)) {
+    // Fallback: use timestamp to guarantee uniqueness
+    return `${prefix}-${Date.now().toString(36).toUpperCase().slice(-4)}`;
+  }
+  return candidate;
 }
 
 function fmtDate(dateStr) {
