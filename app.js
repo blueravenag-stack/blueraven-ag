@@ -143,7 +143,13 @@ async function syncData() {
     const data = await res.json();
     if (data.error) throw new Error(data.error);
 
-    DB.orders       = parseSheet(data.orders,       orderHeaders());
+    DB.orders       = parseSheet(data.orders,       orderHeaders()).map(o => ({
+      ...o,
+      OrderDate:     toDateStr(o.OrderDate),
+      PlantingDate:  toDateStr(o.PlantingDate),
+      ScheduledDate: toDateStr(o.ScheduledDate),
+      CompletedDate: toDateStr(o.CompletedDate),
+    }));
     DB.customers    = parseSheet(data.customers,     customerHeaders());
     DB.pilots       = parseSheet(data.pilots,        pilotHeaders());
     DB.products     = parseSheet(data.products,      productHeaders());
@@ -1800,7 +1806,7 @@ async function saveOrder() {
 
   const order = {
     OrderID: orderId,
-    OrderDate: editId ? (DB.orders.find(o => o.OrderID === editId)?.OrderDate || new Date().toISOString().split('T')[0]) : new Date().toISOString().split('T')[0],
+    OrderDate: editId ? toDateStr(DB.orders.find(o => o.OrderID === editId)?.OrderDate || new Date().toISOString().split('T')[0]) : new Date().toISOString().split('T')[0],
     CustomerID: custId,
     CustomerName: custName,
     CropType: document.getElementById('fCropType').value,
@@ -1883,11 +1889,44 @@ function nextId(prefix, existing) {
 }
 
 function fmtDate(dateStr) {
-  if (!dateStr) return '—';
+  if (!dateStr || dateStr === '—') return '—';
   try {
-    const d = new Date(dateStr + 'T12:00:00');
+    const s = String(dateStr).trim();
+    let d;
+    // Google Sheets date serial (number of days since Dec 30 1899)
+    if (/^\d{4,5}(\.\d+)?$/.test(s)) {
+      d = new Date((parseFloat(s) - 25569) * 86400 * 1000);
+    }
+    // Full ISO timestamp — strip time component
+    else if (s.includes('T')) {
+      d = new Date(s.split('T')[0] + 'T12:00:00');
+    }
+    // Plain YYYY-MM-DD
+    else if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+      d = new Date(s + 'T12:00:00');
+    }
+    // Anything else — try direct parse
+    else {
+      d = new Date(s);
+    }
+    if (isNaN(d.getTime())) return dateStr;
     return d.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
-  } catch { return dateStr; }
+  } catch { return String(dateStr); }
+}
+
+function toDateStr(val) {
+  // Normalize any date value to YYYY-MM-DD string for storage
+  if (!val) return '';
+  const s = String(val).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;          // already clean
+  if (s.includes('T')) return s.split('T')[0];            // strip timestamp
+  if (/^\d{4,5}(\.\d+)?$/.test(s)) {                      // Sheets serial
+    const d = new Date((parseFloat(s) - 25569) * 86400 * 1000);
+    return d.toISOString().split('T')[0];
+  }
+  const d = new Date(s);
+  if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
+  return s;
 }
 
 function openModal(id) {
