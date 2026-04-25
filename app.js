@@ -1556,7 +1556,7 @@ function renderGDUCard(r) {
     <div class="gdu-status ${urgency}">${statusMsg}${r.targetProjected ? ' <span style="color:var(--text-sub);font-size:0.78rem">(*projected beyond 14-day forecast)</span>' : ''}</div>
 
     <div class="gdu-data-quality">
-      <span>📡 ${r.histDays || 0} days historical · ${r.fcstDays || 0} days forecast · ${r.coverage || 0}% coverage</span>
+      <span>📡 ${r.histDays||0}d ERA5 actual · ${(r.tier2Days||0)+(r.fcstDays||0)}d GFS forecast · ${r.seasDays||0}d SEAS5 seasonal · ${r.coverage||0}% coverage</span>
       <button class="gdu-detail-toggle" onclick="toggleGDUDetail('${r.orderId}')">▼ Daily data</button>
     </div>
 
@@ -1571,7 +1571,7 @@ function renderGDUCard(r) {
               <td>${d.minF != null ? d.minF.toFixed(1) + '°' : '—'}</td>
               <td>${d.dailyGDU != null ? d.dailyGDU.toFixed(1) : '—'}</td>
               <td>${d.cumGDU != null ? Math.round(d.cumGDU) : '—'}</td>
-              <td style="color:var(--text-sub);font-size:0.7rem">${d.isForecast ? 'fcst' : ''}</td>
+              <td style="color:var(--text-sub);font-size:0.7rem">${d.tier===3?'seasonal':d.isForecast?'forecast':''}</td>
             </tr>`).join('')}
         </tbody>
       </table>

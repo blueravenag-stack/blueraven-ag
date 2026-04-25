@@ -55,47 +55,57 @@ window.GDUCalc = (() => {
   // Free weather API — no key needed
   // Historical data available from 1940, forecast 7-16 days ahead
 
+  // ── THREE-TIER WEATHER STRATEGY ─────────────────────────────────────────
+  // Tier 1: ERA5 archive          planting date → 7 days ago   (historical actual)
+  // Tier 2: GFS/HRRR forecast     7 days ago → +14 days        (high-res forecast)
+  // Tier 3: ECMWF SEAS5 seasonal  +14 days → VT projection     (6-month ensemble)
+
   async function fetchWeather(lat, lng, startDate, endDate) {
-    // Returns array of {date, maxF, minF}
-    // Strategy:
-    //   Open-Meteo ARCHIVE has ~5 day delay — unreliable for recent dates
-    //   Open-Meteo FORECAST covers 2 days BACK through 16 days AHEAD
-    //   So: use archive for data > 7 days old, forecast for recent + future
-    const today     = new Date().toISOString().split('T')[0];
-    const cutover   = addDays(today, -7); // use archive for data older than 7 days
-    const fcstBack  = addDays(today, -2); // forecast covers back to 2 days ago
-    const results   = [];
+    const today    = new Date().toISOString().split('T')[0];
+    const t1End    = addDays(today, -7);   // archive reliable up to 7 days ago
+    const t2Start  = addDays(today, -2);   // forecast API covers from 2 days ago
+    const t2End    = addDays(today, 14);   // GFS/HRRR goes 14 days ahead
+    const t3Start  = addDays(today, 15);   // seasonal picks up after day 14
+    const results  = [];
 
-    // Archive: planting date → 7 days ago (reliable historical data)
-    if (startDate < cutover) {
-      const archiveEnd = endDate < cutover ? endDate : addDays(cutover, -1);
+    // TIER 1 — ERA5 archive (oldest reliable historical)
+    if (startDate <= t1End) {
+      const end = endDate < t1End ? endDate : t1End;
       try {
-        const hist = await fetchHistorical(lat, lng, startDate, archiveEnd);
-        results.push(...hist);
-      } catch(e) { console.warn('Archive fetch failed:', e.message); }
+        const hist = await fetchHistorical(lat, lng, startDate, end);
+        results.push(...hist.map(d => ({ ...d, tier: 1, isForecast: false })));
+      } catch(e) { console.warn('Tier 1 (archive) failed:', e.message); }
     }
 
-    // Forecast API: covers last 2 days through next 16 — fills the gap
-    const fcstStart = startDate > fcstBack ? startDate : fcstBack;
-    const fcstEnd   = endDate;
-    if (fcstStart <= fcstEnd) {
+    // TIER 2 — GFS/HRRR forecast (recent actual + 14-day forecast)
+    const t2S = startDate > t2Start ? startDate : t2Start;
+    const t2E = endDate   < t2End   ? endDate   : t2End;
+    if (t2S <= t2E) {
       try {
-        const fcst = await fetchForecast(lat, lng, fcstStart, fcstEnd);
-        results.push(...fcst);
-      } catch(e) { console.warn('Forecast fetch failed:', e.message); }
+        const fcst = await fetchForecast(lat, lng, t2S, t2E);
+        results.push(...fcst.map(d => ({ ...d, tier: 2 })));
+      } catch(e) { console.warn('Tier 2 (forecast) failed:', e.message); }
     }
 
-    // Deduplicate by date (forecast may overlap archive), prefer archive data
+    // TIER 3 — ECMWF SEAS5 seasonal (beyond 14 days, up to 6 months)
+    const t3S = startDate > t3Start ? startDate : t3Start;
+    if (endDate >= t3Start && t3S <= endDate) {
+      try {
+        const seas = await fetchSeasonal(lat, lng, t3S, endDate);
+        results.push(...seas.map(d => ({ ...d, tier: 3, isForecast: true })));
+      } catch(e) { console.warn('Tier 3 (seasonal) failed:', e.message); }
+    }
+
+    // Merge: deduplicate by date, prefer lower tier number (more accurate)
     const byDate = {};
-    results.forEach(d => {
-      if (!byDate[d.date] || d.isForecast) byDate[d.date] = d; // archive wins
-    });
-    // Actually: for the overlap zone (7-2 days ago), prefer whichever has data
-    results.forEach(d => {
-      if (!byDate[d.date]) byDate[d.date] = d;
+    // Add in reverse priority so lower tier (more accurate) wins on overwrite
+    [...results].sort((a, b) => b.tier - a.tier).forEach(d => {
+      byDate[d.date] = d;
     });
 
-    return Object.values(byDate).sort((a, b) => a.date.localeCompare(b.date));
+    return Object.values(byDate)
+      .filter(d => d.date >= startDate && d.date <= endDate)
+      .sort((a, b) => a.date.localeCompare(b.date));
   }
 
   async function fetchHistorical(lat, lng, start, end) {
@@ -123,6 +133,39 @@ window.GDUCalc = (() => {
     all.forEach(d => { d.isForecast = d.date > today2; });
     // Filter to requested range
     return all.filter(d => d.date >= start && d.date <= end);
+  }
+
+  async function fetchSeasonal(lat, lng, start, end) {
+    // ECMWF SEAS5 seasonal forecast — 51 ensemble members averaged
+    // Returns daily max/min temps for up to 6 months ahead
+    const url = `https://seasonal-api.open-meteo.com/v1/seasonal?` +
+      `latitude=${lat}&longitude=${lng}` +
+      `&daily=temperature_2m_max,temperature_2m_min` +
+      `&forecast_months=6` +
+      `&temperature_unit=fahrenheit` +
+      `&timezone=America%2FChicago`;
+    const res  = await fetch(url);
+    if (!res.ok) throw new Error(`Seasonal API HTTP ${res.status}`);
+    const data = await res.json();
+    if (data.error) throw new Error(data.reason || 'Seasonal API error');
+
+    const daily = data.daily || {};
+    const dates = daily.time || [];
+
+    // Seasonal returns ensemble members: temperature_2m_max_member01, _member02, etc.
+    // OR temperature_2m_max_mean if means are available. Try mean first, fall back to avg.
+    const maxKeys = Object.keys(daily).filter(k => k.startsWith('temperature_2m_max'));
+    const minKeys = Object.keys(daily).filter(k => k.startsWith('temperature_2m_min'));
+
+    return dates.map((date, i) => {
+      // Average all ensemble members for this day
+      const maxVals = maxKeys.map(k => daily[k]?.[i]).filter(v => v != null);
+      const minVals = minKeys.map(k => daily[k]?.[i]).filter(v => v != null);
+      const maxF = maxVals.length ? maxVals.reduce((a, b) => a + b, 0) / maxVals.length : null;
+      const minF = minVals.length ? minVals.reduce((a, b) => a + b, 0) / minVals.length : null;
+      return { date, maxF, minF, isForecast: true, memberCount: maxVals.length };
+    })
+    .filter(d => d.maxF !== null && d.date >= start && d.date <= end);
   }
 
   function zipTemps(data) {
@@ -192,10 +235,11 @@ window.GDUCalc = (() => {
     const lng = parseFloat(field?.CentroidLng || -90.14);
 
     const today     = new Date().toISOString().split('T')[0];
-    const fcstEnd   = addDays(today, 14);
+    // Extend end date far enough to cover VT for any RM (max ~210 days from early April)
+    const fcstEnd   = addDays(today, 180);
 
     try {
-      // Fetch weather from planting to today + 14-day forecast
+      // Fetch weather from planting through seasonal forecast (6 months out)
       const temps = await fetchWeather(lat, lng, plantDate, fcstEnd);
 
       // Mark forecast days
@@ -223,8 +267,10 @@ window.GDUCalc = (() => {
       const stage = estimateStage(currentGDU, rm);
 
       // Data quality summary
-      const histDays  = withGDU.filter(d => !d.isForecast).length;
-      const fcstDays  = withGDU.filter(d =>  d.isForecast).length;
+      const histDays   = withGDU.filter(d => d.tier === 1).length;
+      const fcstDays   = withGDU.filter(d => d.tier === 2 && d.isForecast).length;
+      const seasDays   = withGDU.filter(d => d.tier === 3).length;
+      const tier2Days  = withGDU.filter(d => d.tier === 2 && !d.isForecast).length;
       const totalDays = withGDU.length;
       const daysSincePlant = Math.round((new Date() - new Date(plantDate + 'T12:00:00')) / 86400000);
       const coverage  = totalDays > 0 ? Math.round(totalDays / Math.max(daysSincePlant, 1) * 100) : 0;
@@ -250,7 +296,7 @@ window.GDUCalc = (() => {
         withGDU,
         lat, lng,
         // Data quality
-        histDays, fcstDays, totalDays, daysSincePlant, coverage,
+        histDays, fcstDays, seasDays, tier2Days, totalDays, daysSincePlant, coverage,
       };
     } catch(e) {
       return { error: 'Weather fetch failed: ' + e.message, orderId: order.OrderID };
