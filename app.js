@@ -1111,7 +1111,12 @@ async function onMapFieldsConfirmed(mapFields, custId, custName) {
         Acres:        acres,
         CentroidLat:  ctr ? ctr.lat.toFixed(6) : '',
         CentroidLng:  ctr ? ctr.lng.toFixed(6) : '',
-        PolygonKML:   mf.kml || '',
+        PolygonKML:   (() => {
+          // Simplify polygon to reduce URL size (RDP algorithm)
+          if (!mf.points || mf.points.length === 0) return '';
+          const simplified = GeoUtils.simplifyPolygon(mf.points, 0.00005);
+          return GeoUtils.pointsToKML(simplified);
+        })(),
         CLU_TractID:  cluId,
         CLU_FarmNum:  mf.farmNum || '',
         Active:       'Yes',
@@ -2131,14 +2136,30 @@ async function saveOrder() {
 
 // ── WRITE TO SHEET ───────────────────────────────────────────────────────────
 async function writeRow(table, data) {
-  // Send writes as GET params to avoid all CORS/redirect issues with GAS POST.
-  // GAS doGet handles both reads (?action=read) and writes (?action=write&table=X&data=JSON)
+  // Use GET for small payloads, POST (text/plain) for large ones (e.g. KML polygons).
+  // GAS accepts both via doGet and doPost reading e.postData.contents.
   try {
-    const encoded = encodeURIComponent(JSON.stringify(data));
-    const url = `${GAS_URL}?action=write&table=${table}&data=${encoded}`;
-    const res = await fetch(url);
+    const body    = JSON.stringify(data);
+    const encoded = encodeURIComponent(body);
+    const getUrl  = `${GAS_URL}?action=write&table=${table}&data=${encoded}`;
+
+    let res;
+    if (getUrl.length > 4000) {
+      // Large payload — use POST with text/plain to avoid CORS preflight
+      res = await fetch(GAS_URL, {
+        method:  'POST',
+        mode:    'no-cors',
+        headers: { 'Content-Type': 'text/plain' },
+        body:    JSON.stringify({ action: 'write', table, data }),
+      });
+      // no-cors returns opaque response — assume success
+      console.log('Write POST (large):', table, data[Object.keys(data)[0]]);
+      return;
+    }
+
+    res = await fetch(getUrl);
     const result = await res.json();
-    if (result.error) console.warn('Write error from GAS:', result.error);
+    if (result.error) console.warn('Write error:', result.error);
     else console.log('Write OK:', result.action, table);
   } catch(e) {
     console.warn('Write failed:', e.message);

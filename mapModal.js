@@ -429,14 +429,16 @@ window.MapModal = (() => {
 
         rings.forEach((ring, ringIdx) => {
           if (ring.length < 4) return;
-          // Compute bbox for viewport filtering
-          const lngs = ring.map(c => c[0]);
-          const lats = ring.map(c => c[1]);
+          // Reproject to WGS84 if coordinates are in Albers meters
+          const wgsRing = GeoUtils.normalizeRing(ring);
+          // Compute bbox for viewport filtering (in WGS84 degrees)
+          const lngs = wgsRing.map(c => c[0]);
+          const lats = wgsRing.map(c => c[1]);
           const bbox = {
             xmin: Math.min(...lngs), xmax: Math.max(...lngs),
             ymin: Math.min(...lats), ymax: Math.max(...lats),
           };
-          const points = ring.map(c => ({ lng: c[0], lat: c[1] }));
+          const points = wgsRing.map(c => ({ lng: c[0], lat: c[1] }));
           const acres  = acres_prop > 0 && rings.length === 1
             ? acres_prop.toFixed(1)
             : GeoUtils.calcAcres(points).toFixed(1);

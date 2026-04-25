@@ -270,6 +270,100 @@ window.GeoUtils = (() => {
     } catch(e) { return null; }
   }
 
+
+  // ── COORDINATE REPROJECTION ───────────────────────────────────────────────
+  // Inverse Albers Equal Area Conic → WGS84 (for USDA ACPF / FSA CLU files)
+  // PRJ: Origin=23N, CM=-96, SP1=29.5, SP2=45.5, NAD83, FE=0, FN=0
+
+  function albersToWGS84(x, y) {
+    const toRad = d => d * Math.PI / 180;
+    const phi1 = toRad(29.5), phi2 = toRad(45.5), phi0 = toRad(23.0);
+    const lam0 = toRad(-96.0);
+    const a = 6378137.0, f = 1/298.257222101;
+    const e2 = 2*f - f*f, e = Math.sqrt(e2);
+
+    function alpha(phi) {
+      const s = Math.sin(phi);
+      return (1-e2)*(s/(1-e2*s*s) - Math.log((1-e*s)/(1+e*s))/(2*e));
+    }
+    function mfn(phi) { const s=Math.sin(phi); return Math.cos(phi)/Math.sqrt(1-e2*s*s); }
+
+    const m1=mfn(phi1), m2=mfn(phi2);
+    const a1=alpha(phi1), a2=alpha(phi2), a0=alpha(phi0);
+    const n = (m1*m1 - m2*m2) / (a2 - a1);
+    const C = m1*m1 + n*a1;
+    const rho0 = a * Math.sqrt(C - n*a0) / n;
+
+    let rho = Math.sqrt(x*x + (rho0-y)*(rho0-y));
+    if (n < 0) rho = -rho;
+    const theta = Math.atan2(x, rho0 - y);
+    const alp = (C - (rho*n/a)*(rho*n/a)) / n;
+
+    let phi = Math.asin(alp / 2);
+    for (let i = 0; i < 12; i++) {
+      const s = Math.sin(phi);
+      const d = ((1-e2*s*s)*(1-e2*s*s) / (2*Math.cos(phi))) *
+                (alp/(1-e2) - s/(1-e2*s*s) + Math.log((1-e*s)/(1+e*s))/(2*e));
+      phi += d;
+      if (Math.abs(d) < 1e-12) break;
+    }
+    const lam = lam0 + theta / n;
+    return { lat: phi * 180/Math.PI, lng: lam * 180/Math.PI };
+  }
+
+  // Detect if a coordinate array is in Albers meters (vs WGS84 degrees)
+  // Albers coords for CONUS are ~300000–900000 (x) and ~1500000–2500000 (y)
+  function isAlbersCoords(ring) {
+    if (!ring || !ring.length) return false;
+    const x = Math.abs(ring[0][0]), y = Math.abs(ring[0][1]);
+    return x > 1000 || y > 1000;  // WGS84 is always < 180/90
+  }
+
+  // Convert a ring of coordinates to WGS84 if in Albers
+  function normalizeRing(ring) {
+    if (!ring || !ring.length) return ring;
+    if (!isAlbersCoords(ring)) return ring;
+    return ring.map(c => {
+      const p = albersToWGS84(c[0], c[1]);
+      return [p.lng, p.lat];
+    });
+  }
+
+  // ── POLYGON SIMPLIFICATION (Ramer-Douglas-Peucker) ───────────────────────
+  // Reduces point count while preserving shape. epsilon in degrees (~0.00001 = ~1m)
+
+  function simplifyPolygon(points, epsilon) {
+    if (!points || points.length < 3) return points;
+    epsilon = epsilon || 0.00005; // ~5 meters — good for field boundaries
+    return rdp(points, epsilon);
+  }
+
+  function rdp(pts, eps) {
+    if (pts.length <= 2) return pts;
+    let maxDist = 0, maxIdx = 0;
+    const start = pts[0], end = pts[pts.length-1];
+    for (let i = 1; i < pts.length-1; i++) {
+      const d = pointLineDistance(pts[i], start, end);
+      if (d > maxDist) { maxDist = d; maxIdx = i; }
+    }
+    if (maxDist > eps) {
+      const left  = rdp(pts.slice(0, maxIdx+1), eps);
+      const right = rdp(pts.slice(maxIdx), eps);
+      return left.slice(0, -1).concat(right);
+    }
+    return [start, end];
+  }
+
+  function pointLineDistance(p, a, b) {
+    const dx = b.lng - a.lng, dy = b.lat - a.lat;
+    if (dx === 0 && dy === 0) {
+      return Math.sqrt((p.lng-a.lng)**2 + (p.lat-a.lat)**2);
+    }
+    const t = ((p.lng-a.lng)*dx + (p.lat-a.lat)*dy) / (dx*dx + dy*dy);
+    const tc = Math.max(0, Math.min(1, t));
+    return Math.sqrt((p.lng - (a.lng+tc*dx))**2 + (p.lat - (a.lat+tc*dy))**2);
+  }
+
   // ── PUBLIC API ────────────────────────────────────────────────────────────
   return {
     parsePolygon,
@@ -281,6 +375,10 @@ window.GeoUtils = (() => {
     polygonToSVG,
     fetchCLU,
     geocodeAddress,
+    albersToWGS84,
+    normalizeRing,
+    isAlbersCoords,
+    simplifyPolygon,
   };
 
 })();

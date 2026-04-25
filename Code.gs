@@ -1,4 +1,4 @@
-// BLUE RAVEN AG — Google Apps Script v1.6
+// BLUE RAVEN AG — Google Apps Script v2.0
 // Paste into script.google.com — deploy as Web App
 //   Execute as: Me
 //   Who has access: Anyone (anonymous)
@@ -18,13 +18,29 @@ const TABS = {
   orderFields:   'OrderFields',
 };
 
-// ── ALL REQUESTS GO THROUGH doGet ────────────────────────────────────────────
+// ── doGet: reads all data OR handles small writes via query params ─────────
 function doGet(e) {
   try {
-    const action = e.parameter.action || 'read';
+    const action = (e.parameter && e.parameter.action) || 'read';
     if (action === 'read')  return handleRead();
     if (action === 'write') return handleWrite(e.parameter);
     return jsonOut({ error: 'Unknown action: ' + action });
+  } catch(err) {
+    return jsonOut({ error: err.message });
+  }
+}
+
+// ── doPost: handles large writes (e.g. polygon KML data) ──────────────────
+// Called with Content-Type: text/plain, body = JSON string
+function doPost(e) {
+  try {
+    const raw     = e.postData ? e.postData.contents : '{}';
+    const payload = JSON.parse(raw);
+    const { action, table, data } = payload;
+    if (action === 'write') {
+      return handleWriteData(table, data);
+    }
+    return jsonOut({ error: 'Unknown POST action: ' + action });
   } catch(err) {
     return jsonOut({ error: err.message });
   }
@@ -43,7 +59,10 @@ function handleRead() {
 function handleWrite(params) {
   const table = params.table;
   const data  = JSON.parse(decodeURIComponent(params.data));
+  return handleWriteData(table, data);
+}
 
+function handleWriteData(table, data) {
   const ss      = SpreadsheetApp.openById(SHEET_ID);
   const tabName = TABS[table];
   const sheet   = ss.getSheetByName(tabName);
@@ -55,7 +74,7 @@ function handleWrite(params) {
 
   let rowIdx = -1;
   if (lastRow > 1) {
-    const ids = sheet.getRange(2, 1, lastRow - 1, 1).getValues().flat().map(String);
+    const ids = sheet.getRange(2, 1, lastRow-1, 1).getValues().flat().map(String);
     rowIdx = ids.indexOf(idValue);
   }
 
@@ -67,16 +86,12 @@ function handleWrite(params) {
   const rowValues = headers.map(h => (data[h] !== undefined && data[h] !== null) ? data[h] : '');
 
   if (rowIdx > -1) {
-    sheet.getRange(rowIdx + 2, 1, 1, rowValues.length).setValues([rowValues]);
-    return jsonOut({ success: true, action: 'updated', row: rowIdx + 2 });
+    sheet.getRange(rowIdx+2, 1, 1, rowValues.length).setValues([rowValues]);
+    return jsonOut({ success: true, action: 'updated' });
   } else {
     sheet.appendRow(rowValues);
     return jsonOut({ success: true, action: 'inserted' });
   }
-}
-
-function doPost(e) {
-  return jsonOut({ error: 'Use GET requests. See app.js writeRow().' });
 }
 
 function jsonOut(obj) {
