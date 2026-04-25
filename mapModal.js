@@ -429,37 +429,73 @@ window.MapModal = (() => {
     clearCLULayer();
     const features = geojson.features || [];
     let count = 0;
+    let fieldIndex = 0;
 
-    features.forEach((feat, i) => {
-      const points = GeoUtils.parsePolygon(JSON.stringify(feat.geometry));
-      if (!points || points.length < 3) return;
-      
-      const props  = feat.properties || {};
-      const acres  = parseFloat(props.CALCACRES || props.clu_calculated_acreage || props.ACRES || GeoUtils.calcAcres(points)).toFixed(1);
-      const farmNum= String(props.FARMNBR || props.farm_number || props.FARM_NUM || '');
-      const cluNum = String(props.CLUNBR || props.clu_number || props.CLU_NUM || props.FID || i);
+    features.forEach((feat, featIdx) => {
+      const props = feat.properties || {};
+      const geom  = feat.geometry;
+      if (!geom) return;
 
-      const isSelected = selectedFields.some(s => s.id === cluNum);
-      const poly = L.polygon(points.map(p => [p.lat, p.lng]), fieldStyle(isSelected)).addTo(cluLayer);
-      
-      const field = { id: cluNum, farmNum, acres, points, fromFile: true };
-      poly._field = field;
-      if (isSelected) { const sf = selectedFields.find(s=>s.id===cluNum); if(sf) sf.polygon=poly; }
-      
-      poly.on('click', e => { L.DomEvent.stopPropagation(e); toggleField(poly); });
-      poly.bindTooltip(
-        `${acres} ac${farmNum ? ' · Farm ' + farmNum : ''}`,
-        { permanent: false, direction: 'center', className: 'clu-tooltip' }
-      );
-      count++;
+      // Extract all rings from the geometry as individual field candidates
+      // Handles: Polygon (single or multi-ring), MultiPolygon
+      const rings = extractRings(geom);
+      if (!rings.length) return;
+
+      // Filter to only outer rings (CLU parts are typically all outer rings)
+      // Outer ring determination: positive signed area = CCW (standard GeoJSON)
+      // We treat ALL rings as potential fields since CLU exports pack separate
+      // fields as multiple parts in a single shape record
+      rings.forEach((ring, ringIdx) => {
+        if (ring.length < 4) return; // need at least 3 unique points + closure
+
+        const points = ring.map(c => ({ lng: c[0], lat: c[1] }));
+        const acres  = GeoUtils.calcAcres(points).toFixed(1);
+        const farmNum= String(props.FARMNBR || props.farm_number || props.FARM_NUM || '');
+        const cluNum = String(props.CLUNBR || props.clu_number || props.CLU_NUM ||
+                              props.FID || `${featIdx}-${ringIdx}`);
+        const uniqueId = rings.length > 1 ? `${cluNum}-r${ringIdx}` : cluNum;
+
+        // Skip tiny rings (< 0.5 acres) — likely digitizing artifacts
+        if (parseFloat(acres) < 0.5) return;
+
+        const isSelected = selectedFields.some(s => s.id === uniqueId);
+        const poly = L.polygon(points.map(p => [p.lat, p.lng]), fieldStyle(isSelected)).addTo(cluLayer);
+        const field = { id: uniqueId, farmNum, acres, points, fromFile: true };
+        poly._field = field;
+        if (isSelected) { const sf = selectedFields.find(s => s.id === uniqueId); if(sf) sf.polygon = poly; }
+
+        poly.on('click', e => { L.DomEvent.stopPropagation(e); toggleField(poly); });
+        poly.bindTooltip(
+          `${parseFloat(acres).toFixed(1)} ac${farmNum ? ' · Farm ' + farmNum : ''}`,
+          { permanent: false, direction: 'center', className: 'clu-tooltip' }
+        );
+        count++;
+      });
     });
 
     if (count > 0) {
-      map.fitBounds(cluLayer.getBounds(), { padding: [20,20] });
-      setStatus(`${count} fields loaded — tap to select`);
+      try { map.fitBounds(cluLayer.getBounds(), { padding: [20,20] }); } catch(e) {}
+      setStatus(`${count} field${count!==1?'s':''} loaded — tap to select`);
     } else {
-      setStatus('⚠ No valid polygons found in file');
+      setStatus('⚠ No valid field polygons found in file');
     }
+  }
+
+  // Extract all coordinate rings from any GeoJSON geometry type
+  function extractRings(geom) {
+    if (!geom) return [];
+    if (geom.type === 'Polygon') {
+      // Return all rings (outer + inner) as separate candidates
+      // For CLU data, inner rings are sometimes separate fields, not holes
+      return (geom.coordinates || []).filter(r => r && r.length >= 4);
+    }
+    if (geom.type === 'MultiPolygon') {
+      // Flatten all polygons and all their rings
+      return (geom.coordinates || []).flatMap(poly =>
+        (poly || []).filter(r => r && r.length >= 4)
+      );
+    }
+    return [];
   }
 
   // ── PUBLIC ────────────────────────────────────────────────────────────────
