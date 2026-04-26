@@ -13,13 +13,26 @@ window.GeoUtils = (() => {
   }
 
   function parseKML(text) {
-    // Handles both full KML files and bare <Polygon> fragments
+    // Handles single <Polygon>, multi-polygon (concatenated), and full KML files
     if (!text.includes('<coordinates') && !text.includes('<Coordinates')) return null;
     try {
-      const match = text.match(/<coordinates[^>]*>([\s\S]*?)<\/coordinates>/i);
-      if (!match) return null;
-      return coordStringToPoints(match[1]);
+      const matches = [...text.matchAll(/<coordinates[^>]*>([\s\S]*?)<\/coordinates>/gi)];
+      if (!matches.length) return null;
+      if (matches.length === 1) return coordStringToPoints(matches[0][1]);
+      // Multi-polygon: return points from the LARGEST ring (for acres/centroid calcs)
+      // All rings are stored; display uses polygonToSVGMulti
+      const rings = matches.map(m => coordStringToPoints(m[1])).filter(Boolean);
+      if (!rings.length) return null;
+      // Return largest ring as primary (for calcAcres, centroid)
+      return rings.reduce((best, r) => r.length > best.length ? r : best, rings[0]);
     } catch(e) { return null; }
+  }
+
+  function parseKMLAllRings(text) {
+    // Returns ALL rings from a multi-polygon KML as array of point arrays
+    if (!text || !text.includes('<coordinates')) return [];
+    const matches = [...text.matchAll(/<coordinates[^>]*>([\s\S]*?)<\/coordinates>/gi)];
+    return matches.map(m => coordStringToPoints(m[1])).filter(r => r && r.length >= 3);
   }
 
   function parseGeoJSON(text) {
@@ -170,6 +183,46 @@ window.GeoUtils = (() => {
   }
 
   // ── SVG FIELD PREVIEW ─────────────────────────────────────────────────────
+
+
+  // Render SVG from a KML string that may contain multiple polygons
+  function polygonToSVGFromKML(kml, opts = {}) {
+    const rings = parseKMLAllRings(kml);
+    if (!rings.length) return '';
+    if (rings.length === 1) return polygonToSVG(rings[0], opts);
+
+    // Multi-polygon: compute combined bounds
+    const allPts = rings.flat();
+    const lats = allPts.map(p => p.lat), lngs = allPts.map(p => p.lng);
+    const minLat = Math.min(...lats), maxLat = Math.max(...lats);
+    const minLng = Math.min(...lngs), maxLng = Math.max(...lngs);
+    const dLat = maxLat - minLat || 0.0001;
+    const dLng = maxLng - minLng || 0.0001;
+    const midLat = (minLat + maxLat) / 2;
+    const lngScale = Math.cos(midLat * Math.PI / 180);
+    const dLngM = dLng * lngScale;
+    const aspect = dLngM / dLat;
+    const H = opts.height || 120;
+    const W = Math.max(80, Math.min(280, Math.round(H * aspect)));
+    const pad = opts.padding || 10;
+    const color = opts.color || '#4FC3F7';
+    const fill  = opts.fill  || 'rgba(79,195,247,0.15)';
+
+    const toSVG = p => {
+      const x = pad + ((p.lng - minLng) * lngScale / dLngM) * (W - 2*pad);
+      const y = H - pad - ((p.lat - minLat) / dLat) * (H - 2*pad);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    };
+
+    const polys = rings.map(ring =>
+      `<polygon points="${ring.map(toSVG).join(' ')}" fill="${fill}" stroke="${color}" stroke-width="1.5" stroke-linejoin="round"/>`
+    ).join('
+  ');
+
+    return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:${W}px;height:auto;display:block">
+  ${polys}
+</svg>`;
+  }
 
   function polygonToSVG(points, opts = {}) {
     if (!points || points.length < 3) return '';
@@ -367,12 +420,14 @@ window.GeoUtils = (() => {
   // ── PUBLIC API ────────────────────────────────────────────────────────────
   return {
     parsePolygon,
+    parseKMLAllRings,
     calcAcres,
     centroid,
     pointsToKML,
     pointsToKMLFile,
     mergePolygons,
     polygonToSVG,
+    polygonToSVGFromKML,
     fetchCLU,
     geocodeAddress,
     albersToWGS84,

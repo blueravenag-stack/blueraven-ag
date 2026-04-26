@@ -855,8 +855,7 @@ function showEditFieldModal(fieldId) {
   const preview = document.getElementById('fieldPolygonPreview');
   if (preview) {
     if (f.PolygonKML) {
-      const pts = GeoUtils.parsePolygon(f.PolygonKML);
-      preview.innerHTML = pts ? GeoUtils.polygonToSVG(pts, { width: 220, height: 120 }) : '';
+      preview.innerHTML = GeoUtils.polygonToSVGFromKML(f.PolygonKML, { height: 120 }) || '';
     } else {
       preview.innerHTML = '';
     }
@@ -1026,13 +1025,16 @@ function openMapForOrder() {
   // Build preselected list with points decoded from stored KML
   const preselected = orderFieldsSelected.map(f => {
     const field = DB.fields.find(x => x.FieldID === f.FieldID) || f;
-    const points = field.PolygonKML ? GeoUtils.parsePolygon(field.PolygonKML) : null;
+    const kml   = field.PolygonKML || '';
+    // Use primary ring for centroid/points, pass full KML for multi-polygon display
+    const allRings = kml ? GeoUtils.parseKMLAllRings(kml) : [];
+    const points   = allRings.length > 0 ? allRings[0] : null;
     return {
       id:        field.FieldID,
       fieldName: field.FieldName,
       acres:     field.Acres || '0',
       points,
-      kml:       field.PolygonKML || '',
+      kml,
       fromDB:    true,
     };
   }).filter(f => f.points && f.points.length >= 3);
@@ -1067,56 +1069,50 @@ function openMapForOrder() {
 
 async function onMapFieldsConfirmed(mapFields, custId, custName) {
   // mapFields: [{id, farmNum, acres, points, kml, centroid, fieldName, fromDB}]
-  // Save each as a permanent Field record, then add to order selection.
-  // NO prompts — fields get auto-named; user can rename via Edit Field later.
+  //
+  // Strategy: if multiple NEW polygons are selected together, merge them into
+  // ONE field record with a multi-polygon KML. This matches how a farmer thinks
+  // about a single job ("the Cottinghams fields") and keeps order selection simple.
+  // Preselected/existing DB fields are always added individually (already saved).
 
   let added = 0;
 
-  for (const mf of mapFields) {
+  // ── Separate preselected existing fields from new selections ──────────────
+  const existingFields = mapFields.filter(mf => mf.fromDB);
+  const newFields      = mapFields.filter(mf => !mf.fromDB);
 
-    // ── Preselected existing DB fields ──────────────────────────────────────
-    if (mf.fromDB) {
-      const dbField = DB.fields.find(f => f.FieldID === mf.id);
-      if (dbField && !orderFieldsSelected.find(f => f.FieldID === dbField.FieldID)) {
-        orderFieldsSelected.push(dbField);
-        added++;
-      }
-      continue;
+  // ── Add preselected existing DB fields directly ───────────────────────────
+  for (const mf of existingFields) {
+    const dbField = DB.fields.find(f => f.FieldID === mf.id);
+    if (dbField && !orderFieldsSelected.find(f => f.FieldID === dbField.FieldID)) {
+      orderFieldsSelected.push(dbField);
+      added++;
     }
+  }
 
-    // ── New field (drawn, pasted, or loaded from shapefile/CLU) ─────────────
-    // Determine a stable CLU id for dedup (blank for drawn/pasted/existing)
+  // ── Handle new field polygons ─────────────────────────────────────────────
+  if (newFields.length === 0) {
+    // nothing new
+  } else if (newFields.length === 1) {
+    // Single new polygon → save as individual field record (simple path)
+    const mf = newFields[0];
     const isEphemeral = ['DRAWN-','PASTE-','EXISTING-'].some(p => mf.id.startsWith(p));
     const cluId = isEphemeral ? '' : mf.id;
-
-    // Check if already saved for this customer (same CLU id)
-    let field = cluId
-      ? DB.fields.find(f => f.CLU_TractID === cluId && f.CustomerID === custId)
-      : null;
+    let field = cluId ? DB.fields.find(f => f.CLU_TractID === cluId && f.CustomerID === custId) : null;
 
     if (!field) {
-      // Auto-generate a name the user can rename later
       const fieldId = nextId('FLD', DB.fields.map(f => f.FieldID));
       const acres   = parseFloat(mf.acres || 0).toFixed(1);
-      const name    = mf.fieldName ||
-                      (mf.farmNum ? `Farm ${mf.farmNum}` : `Field ${fieldId}`) +
-                      ` (${acres} ac)`;
-      const ctr = mf.centroid || GeoUtils.centroid(mf.points || []);
-
+      const ctr     = mf.centroid || GeoUtils.centroid(mf.points || []);
       field = {
         FieldID:      fieldId,
         CustomerID:   custId,
         CustomerName: custName,
-        FieldName:    name,
+        FieldName:    mf.fieldName || `Field ${fieldId} (${acres} ac)`,
         Acres:        acres,
         CentroidLat:  ctr ? ctr.lat.toFixed(6) : '',
         CentroidLng:  ctr ? ctr.lng.toFixed(6) : '',
-        PolygonKML:   (() => {
-          // Simplify polygon to reduce URL size (RDP algorithm)
-          if (!mf.points || mf.points.length === 0) return '';
-          const simplified = GeoUtils.simplifyPolygon(mf.points, 0.00005);
-          return GeoUtils.pointsToKML(simplified);
-        })(),
+        PolygonKML:   GeoUtils.pointsToKML(GeoUtils.simplifyPolygon(mf.points || [], 0.00005)),
         CLU_TractID:  cluId,
         CLU_FarmNum:  mf.farmNum || '',
         Active:       'Yes',
@@ -1125,8 +1121,47 @@ async function onMapFieldsConfirmed(mapFields, custId, custName) {
       DB.fields.push(field);
       await writeRow('fields', field);
     }
+    if (!orderFieldsSelected.find(f => f.FieldID === field.FieldID)) {
+      orderFieldsSelected.push(field);
+      added++;
+    }
 
-    // Add to order selection if not already there
+  } else {
+    // Multiple new polygons → prompt for a group name, merge into ONE field record
+    const totalAcres = newFields.reduce((s, mf) => s + parseFloat(mf.acres || 0), 0).toFixed(1);
+    const fieldName  = prompt(
+      `Name this group of ${newFields.length} fields (${totalAcres} ac total):`,
+      'Combined Fields'
+    ) || 'Combined Fields';
+
+    // Build multi-polygon KML: one <Polygon> element per ring
+    const multiKML = newFields.map(mf => {
+      const simplified = GeoUtils.simplifyPolygon(mf.points || [], 0.00005);
+      return GeoUtils.pointsToKML(simplified);
+    }).join('');
+
+    // Centroid of all points combined
+    const allPoints = newFields.flatMap(mf => mf.points || []);
+    const ctr       = GeoUtils.centroid(allPoints);
+
+    const fieldId = nextId('FLD', DB.fields.map(f => f.FieldID));
+    const field = {
+      FieldID:      fieldId,
+      CustomerID:   custId,
+      CustomerName: custName,
+      FieldName:    fieldName,
+      Acres:        totalAcres,
+      CentroidLat:  ctr ? ctr.lat.toFixed(6) : '',
+      CentroidLng:  ctr ? ctr.lng.toFixed(6) : '',
+      PolygonKML:   multiKML,
+      CLU_TractID:  '',
+      CLU_FarmNum:  newFields.find(f => f.farmNum)?.farmNum || '',
+      Active:       'Yes',
+      Notes:        `${newFields.length} polygons`,
+    };
+    DB.fields.push(field);
+    await writeRow('fields', field);
+
     if (!orderFieldsSelected.find(f => f.FieldID === field.FieldID)) {
       orderFieldsSelected.push(field);
       added++;
@@ -1136,9 +1171,7 @@ async function onMapFieldsConfirmed(mapFields, custId, custName) {
   saveToLocalStorage();
   renderOrderFieldsList();
   showToast(
-    added > 0
-      ? `${added} field${added !== 1 ? 's' : ''} added — tap a chip to rename`
-      : 'Fields already in order',
+    added > 0 ? `${added} field${added !== 1 ? 's' : ''} added` : 'Already in order',
     'success'
   );
 }
@@ -1183,7 +1216,7 @@ function openMapForField() {
       }
       if (mf.acres && !mf.fromDB) document.getElementById('fFieldAcres').value = mf.acres;
       const preview = document.getElementById('fieldPolygonPreview');
-      if (preview && mf.points) preview.innerHTML = GeoUtils.polygonToSVG(mf.points, { width: 240, height: 120 });
+      if (preview) preview.innerHTML = GeoUtils.polygonToSVGFromKML(mf.kml || '', { height: 120 }) || '';
       let kmlHidden = document.getElementById('fFieldKML');
       if (!kmlHidden) {
         kmlHidden = document.createElement('input');

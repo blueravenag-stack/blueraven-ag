@@ -73,17 +73,28 @@ window.MapModal = (() => {
       if (selectedFields.length > 0) {
         const bounds = [];
         selectedFields.forEach(f => {
-          if (!f.points || f.points.length < 3) return;
-          const latlngs = f.points.map(p => [p.lat, p.lng]);
-          const poly = L.polygon(latlngs, fieldStyle(true)).addTo(cluLayer);
-          poly._field = { ...f, polygon: poly };
-          poly.on('click', e => { L.DomEvent.stopPropagation(e); toggleField(poly); });
-          poly.bindTooltip(`${parseFloat(f.acres||0).toFixed(1)} ac — ${f.fieldName||f.id}`,
-            { permanent: false, direction: 'center', className: 'clu-tooltip' });
-          // Update reference in selectedFields
+          // Support multi-polygon KML (multiple rings stored in one field)
+          const rings = f.kml ? GeoUtils.parseKMLAllRings(f.kml) :
+                        f.points && f.points.length >= 3 ? [f.points] : [];
+          if (!rings.length) return;
+
+          // Draw all rings as one combined layer, store ref on first ring's poly
+          let primaryPoly = null;
+          rings.forEach((pts, ri) => {
+            const latlngs = pts.map(p => [p.lat, p.lng]);
+            const poly = L.polygon(latlngs, fieldStyle(true)).addTo(cluLayer);
+            poly._field = { ...f, polygon: poly };
+            poly.on('click', e => { L.DomEvent.stopPropagation(e); toggleField(poly); });
+            if (ri === 0) {
+              primaryPoly = poly;
+              poly.bindTooltip(`${parseFloat(f.acres||0).toFixed(1)} ac — ${f.fieldName||f.id}`,
+                { permanent: false, direction: 'center', className: 'clu-tooltip' });
+            }
+            latlngs.forEach(ll => bounds.push(ll));
+          });
+
           const idx = selectedFields.findIndex(s => s.id === f.id);
-          if (idx > -1) selectedFields[idx] = { ...selectedFields[idx], polygon: poly };
-          latlngs.forEach(ll => bounds.push(ll));
+          if (idx > -1 && primaryPoly) selectedFields[idx] = { ...selectedFields[idx], polygon: primaryPoly };
         });
         // Fit map to preselected fields
         if (bounds.length) {
