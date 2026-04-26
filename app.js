@@ -1129,10 +1129,10 @@ async function onMapFieldsConfirmed(mapFields, custId, custName) {
   } else {
     // Multiple new polygons → prompt for a group name, merge into ONE field record
     const totalAcres = newFields.reduce((s, mf) => s + parseFloat(mf.acres || 0), 0).toFixed(1);
-    const fieldName  = prompt(
-      `Name this group of ${newFields.length} fields (${totalAcres} ac total):`,
-      'Combined Fields'
-    ) || 'Combined Fields';
+    // Use field name from first new field or auto-generate
+    // (prompt() is unreliable in async browser contexts — user can rename via Edit Field)
+    const firstName = newFields.find(f => f.fieldName)?.fieldName || '';
+    const fieldName = firstName || `Combined Fields (${totalAcres} ac)`;
 
     // Build multi-polygon KML: one <Polygon> element per ring
     const multiKML = newFields.map(mf => {
@@ -1207,24 +1207,36 @@ function openMapForField() {
       // Restore field modal
       document.getElementById('fieldModal').style.display = '';
       if (!mapFields.length) return;
-      // Use the first confirmed field (could be existing or newly drawn)
-      const mf  = mapFields[0];
-      const ctr = mf.centroid || GeoUtils.centroid(mf.points);
+
+      // Merge ALL confirmed polygons into this one field record
+      // (filter out the preselected EXISTING field — that's the current field)
+      const newMaps = mapFields.filter(mf => !mf.id.startsWith('EXISTING-'));
+      const allMaps = newMaps.length > 0 ? newMaps : mapFields;
+
+      // Merge KML and acres from all confirmed polygons
+      const mergedKML   = allMaps.map(mf => mf.kml || '').filter(Boolean).join('');
+      const totalAcres  = allMaps.reduce((s, mf) => s + parseFloat(mf.acres || 0), 0).toFixed(1);
+      const allPoints   = allMaps.flatMap(mf => mf.points || []);
+      const ctr         = GeoUtils.centroid(allPoints);
+
       if (ctr) {
         document.getElementById('fFieldLat').value = ctr.lat.toFixed(6);
         document.getElementById('fFieldLng').value = ctr.lng.toFixed(6);
       }
-      if (mf.acres && !mf.fromDB) document.getElementById('fFieldAcres').value = mf.acres;
+      if (totalAcres > 0) document.getElementById('fFieldAcres').value = totalAcres;
+
       const preview = document.getElementById('fieldPolygonPreview');
-      if (preview) preview.innerHTML = GeoUtils.polygonToSVGFromKML(mf.kml || '', { height: 120 }) || '';
+      if (preview) preview.innerHTML = GeoUtils.polygonToSVGFromKML(mergedKML, { height: 120 }) || '';
+
       let kmlHidden = document.getElementById('fFieldKML');
       if (!kmlHidden) {
         kmlHidden = document.createElement('input');
         kmlHidden.type = 'hidden'; kmlHidden.id = 'fFieldKML';
         document.getElementById('fieldModal').appendChild(kmlHidden);
       }
-      kmlHidden.value = mf.kml || '';
-      showToast('Field boundary updated from map', 'success');
+      kmlHidden.value = mergedKML;
+      const n = allMaps.length;
+      showToast(`${n} polygon${n!==1?'s':''} merged — ${totalAcres} ac total. Save Field to apply.`, 'success');
     },
     onClose: () => {
       document.getElementById('fieldModal').style.display = '';
