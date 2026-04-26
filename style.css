@@ -841,3 +841,13 @@ body.light .leaflet-container { background: #e8e8e8; }
 
 /* ── Polygon edit vertex markers ── */
 .leaflet-interactive[data-edit-vertex] { cursor: grab; }
+
+/* ── Map selected field editable name ── */
+.map-sel-name {
+  flex: 1; background: transparent; border: none; border-bottom: 1px solid transparent;
+  color: var(--text); font-size: 0.78rem; font-weight: 500; padding: 0;
+  min-width: 60px; cursor: text;
+}
+.map-sel-name:hover { border-bottom-color: var(--accent); }
+.map-sel-name:focus { outline: none; border-bottom-color: var(--accent); background: var(--bg3); border-radius: 2px; padding: 0 2px; }
+.map-sel-acres { color: var(--text-sub); white-space: nowrap; font-size: 0.78rem; margin: 0 0.3rem; }

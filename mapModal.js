@@ -307,12 +307,14 @@ window.MapModal = (() => {
     }
 
     el.innerHTML = selectedFields.map(f => {
-      // Use field name if it was saved as a DB field, otherwise show type label
       const label = f.fieldName || (f.isDrawn ? '✏ Drawn field' : f.isPasted ? '📋 Pasted field' : f.id || 'Field');
+      const safeId = f.id.replace(/'/g, "\'");
       return `<div class="map-sel-chip">
-        <span>${label}</span>
-        <span>${parseFloat(f.acres).toFixed(1)} ac</span>
-        <button onclick="MapModal.removeSelected('${f.id}')">×</button>
+        <input class="map-sel-name" value="${label.replace(/"/g, '&quot;')}"
+          onchange="MapModal.renameSelected('${safeId}', this.value)"
+          title="Click to rename this field">
+        <span class="map-sel-acres">${parseFloat(f.acres).toFixed(1)} ac</span>
+        <button onclick="MapModal.removeSelected('${safeId}')">×</button>
       </div>`;
     }).join('') +
       `<div class="map-sel-total">${total.toFixed(1)} ac total</div>`;
@@ -325,6 +327,15 @@ window.MapModal = (() => {
     if (f?.polygon) f.polygon.setStyle(fieldStyle(false));
     selectedFields = selectedFields.filter(s => s.id !== id);
     updateSelectedPanel();
+  }
+
+  function renameSelected(id, newName) {
+    const f = selectedFields.find(s => s.id === id);
+    if (f) f.fieldName = newName.trim() || f.fieldName;
+    // Update tooltip on polygon if it exists
+    if (f?.polygon) {
+      f.polygon.getTooltip()?.setContent(`${parseFloat(f.acres||0).toFixed(1)} ac — ${f.fieldName}`);
+    }
   }
 
   // ── ADDRESS SEARCH ────────────────────────────────────────────────────────
@@ -491,17 +502,22 @@ window.MapModal = (() => {
         _cluLayerGroup?.clearLayers();
         loadGeoJSON({ type: 'FeatureCollection', features });
       } else {
-        // Large file: viewport-filtered rendering
-        setStatus(`✓ ${_cluData.length.toLocaleString()} fields loaded — zooming to view`);
+        // Large file: viewport-filtered rendering — do NOT zoom out
+        setStatus(`✓ ${_cluData.length.toLocaleString()} fields loaded — CLU boundaries will show at zoom 12+`);
         renderCLUViewport();
-        // Fit map to full extent
+        // Only fit bounds if map is at default/uninitialized position
+        // (i.e. user hasn't navigated yet — check if at default IL center)
         try {
-          const allLats = _cluData.flatMap(f => [f.bbox.ymin, f.bbox.ymax]);
-          const allLngs = _cluData.flatMap(f => [f.bbox.xmin, f.bbox.xmax]);
-          map.fitBounds([
-            [Math.min(...allLats), Math.min(...allLngs)],
-            [Math.max(...allLats), Math.max(...allLngs)]
-          ], { padding: [30, 30] });
+          const center = map.getCenter();
+          const isDefaultPos = Math.abs(center.lat - 39.8) < 0.5 && Math.abs(center.lng + 89.6) < 0.5;
+          if (isDefaultPos) {
+            const allLats = _cluData.flatMap(f => [f.bbox.ymin, f.bbox.ymax]);
+            const allLngs = _cluData.flatMap(f => [f.bbox.xmin, f.bbox.xmax]);
+            map.fitBounds([
+              [Math.min(...allLats), Math.min(...allLngs)],
+              [Math.max(...allLats), Math.max(...allLngs)]
+            ], { padding: [30, 30] });
+          }
         } catch(e) {}
       }
 
@@ -636,11 +652,21 @@ window.MapModal = (() => {
     const btn = document.getElementById('mapCLUBtn');
 
     if (_cluVisible && _cluData) {
-      // Turn OFF
+      // Turn OFF — preserve selected field polygons, only remove unselected CLU
       _cluVisible = false;
-      if (_cluLayerGroup) _cluLayerGroup.clearLayers();
+      const selectedIds = new Set(selectedFields.map(f => f.id));
+      if (_cluLayerGroup) {
+        _cluLayerGroup.eachLayer(layer => {
+          if (layer._field && selectedIds.has(layer._field.id)) {
+            // Move selected polygon to cluLayer so it persists
+            _cluLayerGroup.removeLayer(layer);
+            cluLayer.addLayer(layer);
+          }
+        });
+        _cluLayerGroup.clearLayers();
+      }
       if (btn) { btn.textContent = '🌾 Show CLU Fields'; btn.classList.remove('active'); }
-      setStatus('CLU boundaries hidden — click Show CLU Fields to reload');
+      setStatus('CLU boundaries hidden — selected fields remain visible');
       return;
     }
 
@@ -815,6 +841,6 @@ window.MapModal = (() => {
   function toggleEditMode() { exitEditMode(true); }
 
   // ── PUBLIC ────────────────────────────────────────────────────────────────
-  return { open, close, confirm, toggleDraw, finishDrawBtn, removeSelected, showPastePanel, applyPastedKML, searchAddress, loadShapefileInput, toggleCLU, toggleEditMode };
+  return { open, close, confirm, toggleDraw, finishDrawBtn, removeSelected, renameSelected, showPastePanel, applyPastedKML, searchAddress, loadShapefileInput, toggleCLU, toggleEditMode };
 
 })();

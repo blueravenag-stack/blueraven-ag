@@ -1951,6 +1951,48 @@ function renderReportMap(mapFields, orders) {
   if (bounds.length) {
     window._reportMap.fitBounds(bounds, { padding: [30, 30] });
   }
+
+  // Click map to drop a pin for directions
+  let _reportPin = null;
+  window._reportMap.on('click', (e) => {
+    if (_reportPin) { _reportPin.remove(); _reportPin = null; }
+    _reportPin = L.marker(e.latlng, {
+      icon: L.divIcon({
+        className: '',
+        html: '<div style="width:20px;height:20px;background:var(--danger);border:2px solid #fff;border-radius:50%;box-shadow:0 2px 4px rgba(0,0,0,0.4);cursor:pointer"></div>',
+        iconSize: [20, 20], iconAnchor: [10, 10]
+      })
+    }).addTo(window._reportMap);
+
+    const lat = e.latlng.lat.toFixed(6);
+    const lng = e.latlng.lng.toFixed(6);
+    const mapsUrl = `https://maps.google.com/maps?q=${lat},${lng}&z=16`;
+    const appleMaps = `maps://maps.apple.com/?q=${lat},${lng}&z=16`;
+
+    _reportPin.bindPopup(`
+      <div style="text-align:center;padding:4px">
+        <div style="font-weight:600;margin-bottom:6px">📍 Drop Pin</div>
+        <a href="${mapsUrl}" target="_blank" rel="noopener"
+           style="display:block;padding:4px 8px;background:#4285F4;color:#fff;border-radius:4px;margin-bottom:4px;text-decoration:none;font-size:0.82rem">
+          Open in Google Maps
+        </a>
+        <a href="${appleMaps}"
+           style="display:block;padding:4px 8px;background:#000;color:#fff;border-radius:4px;text-decoration:none;font-size:0.82rem">
+          Open in Apple Maps
+        </a>
+        <div style="font-size:0.7rem;color:#666;margin-top:4px">${lat}, ${lng}</div>
+      </div>
+    `, { maxWidth: 180 }).openPopup();
+  });
+
+  // Show instructions
+  const mapHint = document.createElement('div');
+  mapHint.style.cssText = 'position:absolute;bottom:8px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.6);color:#fff;font-size:0.72rem;padding:4px 10px;border-radius:12px;pointer-events:none;z-index:1000';
+  mapHint.textContent = 'Click map to drop a pin for directions';
+  container.style.position = 'relative';
+  container.appendChild(mapHint);
+  setTimeout(() => mapHint.style.opacity = '0', 3000);
+  mapHint.style.transition = 'opacity 1s';
 }
 
 
