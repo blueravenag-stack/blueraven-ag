@@ -736,8 +736,9 @@ window.MapModal = (() => {
     document.getElementById('mapEditFinishBtn')?.style.setProperty('display', 'inline-flex');
     setStatus('Edit mode: drag vertices · right-click to delete · tap edge to add · Finish Edit when done');
 
-    poly.on('click', onPolygonEditClick);
     map.off('click', onMapClick);
+    map.on('click', onEditMapClick);
+    setStatus('Edit: drag vertices · dbl-click vertex to delete · click near edge to add point · Finish Edit when done');
   }
 
   function onEditMapClick(e) {
@@ -756,7 +757,7 @@ window.MapModal = (() => {
 
     // Only insert if within ~20 pixels of the edge at current zoom
     const metersPerPixel = 40075016.686 * Math.cos(ll.lat * Math.PI/180) / Math.pow(2, map.getZoom() + 8);
-    if (minDist > metersPerPixel * 20) return;
+    if (minDist > metersPerPixel * 40) return; // within 40px of edge
 
     const newMarker = makeVertexMarker(ll, poly);
     _editMarkers.splice(insertAt, 0, newMarker);
