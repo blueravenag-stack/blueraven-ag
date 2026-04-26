@@ -216,8 +216,7 @@ window.GeoUtils = (() => {
 
     const polys = rings.map(ring =>
       `<polygon points="${ring.map(toSVG).join(' ')}" fill="${fill}" stroke="${color}" stroke-width="1.5" stroke-linejoin="round"/>`
-    ).join('
-  ');
+    ).join(' ');
 
     return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:${W}px;height:auto;display:block">
   ${polys}
