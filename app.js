@@ -69,7 +69,8 @@ function updateThemeButton(isLight) {
 
 function loadTheme() {
   const saved = localStorage.getItem('blueraven_theme');
-  const isLight = saved === 'light';
+  // Default to light mode if no preference saved
+  const isLight = saved === null ? true : saved === 'light';
   if (isLight) document.body.classList.add('light');
   updateThemeButton(isLight);
 }
@@ -1901,6 +1902,11 @@ function emailGDUSummary(orderId) {
   const customer = DB.customers.find(c => c.CustomerID === order?.CustomerID);
   const email = customer?.Email || '';
 
+  if (!email) {
+    showToast('No email address on file for this customer', 'error');
+    return;
+  }
+
   const subject = `Fungicide Timing Update — ${r.customerName} (${orderId})`;
   const scheduled = order?.ScheduledDate ? GDUCalc.fmtDate(order.ScheduledDate) : 'Not yet scheduled';
   const body = [
@@ -1926,7 +1932,9 @@ function emailGDUSummary(orderId) {
     `Blue Raven Ag Operations`,
   ].join('\n');
 
-  window.location.href = `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  // Open Gmail compose in new tab — works without a desktop email client
+  const gmailUrl = `https://mail.google.com/mail/?view=cm&to=${encodeURIComponent(email)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  window.open(gmailUrl, '_blank');
 }
 
 // ── GDU TIMELINE VIEW ────────────────────────────────────────────────────────
@@ -2018,18 +2026,18 @@ function renderGDUTimeline() {
 
   container.innerHTML = `
     <div class="tl-wrap">
-      <div class="tl-section-title">Fungicide Windows <span style="font-size:0.72rem;font-weight:400">· <span style="color:var(--warn)">▓</span> window &nbsp; <span style="color:var(--accent)">|</span> target &nbsp; <span style="color:var(--accent2)">◆</span> scheduled &nbsp; <span style="color:var(--danger)">|</span> today</span></div>
-      <div class="tl-chart">
-        <div class="tl-rows">${windowRows}</div>
-        <div class="tl-axis">${ticks}</div>
-      </div>
-
-      <div class="tl-section-title" style="margin-top:1.5rem">Scheduled Acres by Date</div>
+      <div class="tl-section-title">Scheduled Acres by Date</div>
       ${Object.keys(acresByDate).length ? `
       <div class="tl-acres-chart">
         <div class="tl-acres-bars">${acreBars}</div>
         <div class="tl-axis">${ticks}</div>
       </div>` : '<div style="color:var(--text-sub);font-size:0.82rem;padding:0.5rem 0">No scheduled dates set — use Field Cards to assign dates.</div>'}
+
+      <div class="tl-section-title" style="margin-top:1.5rem">Fungicide Windows <span style="font-size:0.72rem;font-weight:400">· <span style="color:var(--warn)">▓</span> window &nbsp; <span style="color:var(--accent)">|</span> target &nbsp; <span style="color:var(--accent2)">◆</span> scheduled &nbsp; <span style="color:var(--danger)">|</span> today</span></div>
+      <div class="tl-chart">
+        <div class="tl-rows">${windowRows}</div>
+        <div class="tl-axis">${ticks}</div>
+      </div>
     </div>`;
 }
 
