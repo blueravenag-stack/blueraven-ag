@@ -109,6 +109,11 @@ function goBack() {
 }
 
 function renderView(view) {
+  // Reset report status to Scheduled whenever entering reports view
+  if (view === 'reports') {
+    const statusEl = document.getElementById('reportStatus');
+    if (statusEl) statusEl.value = 'Scheduled';
+  }
   switch(view) {
     case 'dashboard':  renderDashboard(); break;
     case 'orders':     renderOrdersList(); break;
@@ -244,13 +249,30 @@ function renderDashboard() {
 
 // ── ORDERS LIST ─────────────────────────────────────────────────────────────
 function renderOrdersList() {
+  // Reset crop dropdown when navigating to orders (repopulate from fresh data)
+  const cropSel = document.getElementById('filterCrop');
+  if (cropSel) {
+    cropSel.innerHTML = '<option value="">All Crops</option>';
+  }
   filterOrders();
 }
 
 function filterOrders() {
   const search   = (document.getElementById('orderSearch')?.value || '').toLowerCase();
   const status   = document.getElementById('filterStatus')?.value || '';
+  const crop     = document.getElementById('filterCrop')?.value || '';
   const invoiced = document.getElementById('filterInvoiced')?.value || '';
+
+  // Populate crop dropdown dynamically from data (once)
+  const cropSel = document.getElementById('filterCrop');
+  if (cropSel && cropSel.options.length <= 1) {
+    const crops = [...new Set(DB.orders.map(o => o.CropType).filter(Boolean))].sort();
+    crops.forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c; opt.textContent = c;
+      cropSel.appendChild(opt);
+    });
+  }
 
   const filtered = DB.orders.filter(o => {
     const matchSearch = !search ||
@@ -258,8 +280,9 @@ function filterOrders() {
       DB.orderFields.filter(f=>f.OrderID===o.OrderID).some(f=>f.FieldName.toLowerCase().includes(search)) ||
       o.OrderID.toLowerCase().includes(search);
     const matchStatus   = !status   || o.Status === status;
+    const matchCrop     = !crop     || o.CropType === crop;
     const matchInvoiced = !invoiced || o.Invoiced === invoiced;
-    return matchSearch && matchStatus && matchInvoiced;
+    return matchSearch && matchStatus && matchCrop && matchInvoiced;
   }).sort((a, b) => new Date(b.OrderDate) - new Date(a.OrderDate));
 
   document.getElementById('ordersList').innerHTML =
@@ -1795,13 +1818,38 @@ function renderReports() {
     return;
   }
 
-  // ── SECTION 1: Field summary ──────────────────────────────────────────────
+  // ── SECTION 1: Field summary with expandable chem rows ────────────────────
   let totalAcres = 0;
   const fieldRows = filtered.map(o => {
     const fields = DB.orderFields.filter(f => f.OrderID === o.OrderID);
+    const prods  = DB.orderProds.filter(p => p.OrderID === o.OrderID);
     const ac = parseFloat(o.TotalAcres || 0);
     totalAcres += ac;
-    return `<tr>
+
+    const chemDetail = prods.length ? `
+      <tr class="report-chem-detail" id="chemDetail-${o.OrderID}" style="display:none">
+        <td colspan="8" style="padding:0.5rem 1rem 0.75rem;background:var(--bg-card)">
+          <table style="width:100%;font-size:0.78rem;border-collapse:collapse">
+            <thead><tr style="color:var(--text-sub)">
+              <th style="text-align:left;padding:0.2rem 0.5rem">Product</th>
+              <th style="text-align:right;padding:0.2rem 0.5rem">Rate/Ac</th>
+              <th style="text-align:left;padding:0.2rem 0.5rem">Unit</th>
+              <th style="text-align:right;padding:0.2rem 0.5rem">Total Qty</th>
+              <th style="text-align:left;padding:0.2rem 0.5rem">By</th>
+            </tr></thead>
+            <tbody>${prods.map(p => `<tr>
+              <td style="padding:0.2rem 0.5rem">${p.ProductName}</td>
+              <td style="text-align:right;padding:0.2rem 0.5rem;font-family:var(--font-mono)">${p.RatePerAcre}</td>
+              <td style="padding:0.2rem 0.5rem">${p.Unit}</td>
+              <td style="text-align:right;padding:0.2rem 0.5rem;font-family:var(--font-mono)">${fmtAmt(parseFloat(p.TotalUnitsNeeded||0), p.Unit)}</td>
+              <td style="padding:0.2rem 0.5rem;color:${p.SuppliedBy==='Customer'?'var(--accent2)':'var(--text-sub)'}">${p.SuppliedBy}</td>
+            </tr>`).join('')}</tbody>
+          </table>
+        </td>
+      </tr>` : '';
+
+    const hasChems = prods.length > 0;
+    return `<tr class="report-row-expandable ${hasChems ? 'has-chems' : ''}" ${hasChems ? `onclick="toggleReportChemDetail('${o.OrderID}')"` : ''} title="${hasChems ? 'Click to show chemical details' : ''}">
       <td>${o.ScheduledDate ? fmtDate(o.ScheduledDate) : fmtDate(o.OrderDate)}</td>
       <td>${o.OrderID}</td>
       <td>${o.CustomerName}</td>
@@ -1809,14 +1857,13 @@ function renderReports() {
       <td>${o.CropType || '—'}</td>
       <td>${o.PilotName || '—'}</td>
       <td>${statusBadge(o.Status)}</td>
-      <td style="text-align:right">${ac > 0 ? ac.toFixed(1) : '—'}</td>
-    </tr>`;
+      <td style="text-align:right">${ac > 0 ? ac.toFixed(1) : '—'}${hasChems ? ' <span style="font-size:0.65rem;color:var(--text-sub)">▼</span>' : ''}</td>
+    </tr>${chemDetail}`;
   }).join('');
 
-  // ── SECTION 2: Product summary ────────────────────────────────────────────
-  // Aggregate all products across filtered orders
-  // Convert to gallons for water calculation using spray rate from template
-  const prodMap = {};
+  // ── SECTION 2: Product summary split Me vs Customer + proper water ────────
+  const prodMapMe  = {};
+  const prodMapCust = {};
   let totalWater = 0;
 
   filtered.forEach(o => {
@@ -1827,26 +1874,59 @@ function renderReports() {
 
     DB.orderProds.filter(p => p.OrderID === o.OrderID).forEach(p => {
       const key = p.ProductID || p.ProductName;
-      if (!prodMap[key]) {
-        prodMap[key] = { name: p.ProductName, unit: p.Unit, total: 0, costPerUnit: parseFloat(p.CostPerUnit||0) };
+      const isCust = (p.SuppliedBy || '').toLowerCase() === 'customer';
+      const map = isCust ? prodMapCust : prodMapMe;
+      if (!map[key]) {
+        map[key] = { name: p.ProductName, unit: p.Unit, total: 0 };
       }
-      prodMap[key].total += parseFloat(p.TotalUnitsNeeded || 0);
+      map[key].total += parseFloat(p.TotalUnitsNeeded || 0);
     });
   });
 
-  const prodRows = Object.values(prodMap).map(p => {
-    const disp = fmtAmt(p.total, p.unit);
-    return `<tr>
+  const buildProdRows = (map) => Object.values(map).map(p =>
+    `<tr>
       <td>${p.name}</td>
-      <td style="text-align:right;font-family:var(--font-mono)">${disp}</td>
-      <td style="color:var(--text-sub)">${p.unit}/ac rate</td>
-    </tr>`;
-  }).join('');
+      <td style="text-align:right;font-family:var(--font-mono)">${fmtAmt(p.total, p.unit)}</td>
+    </tr>`
+  ).join('');
 
-  const waterDisp = fmtAmt(totalWater, 'gallon');
+  const meProdRows   = buildProdRows(prodMapMe);
+  const custProdRows = buildProdRows(prodMapCust);
+  const waterDisp    = fmtAmt(totalWater, 'gallon');
+
+  const prodSection = `
+    <div class="report-section">
+      <div class="report-section-title">Products Needed</div>
+      <div style="overflow-x:auto">
+        ${meProdRows ? `
+        <div style="font-size:0.75rem;font-weight:600;color:var(--text-sub);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.35rem">Supplied by Me</div>
+        <table class="report-table" style="margin-bottom:1rem">
+          <thead><tr><th>Product</th><th style="text-align:right">Total Needed</th></tr></thead>
+          <tbody>${meProdRows}</tbody>
+          <tfoot><tr>
+            <td style="font-weight:600">Water (spray solution)</td>
+            <td style="text-align:right;font-weight:600">${waterDisp}</td>
+          </tr></tfoot>
+        </table>` : `
+        <div style="font-size:0.75rem;font-weight:600;color:var(--text-sub);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.35rem">Supplied by Me</div>
+        <table class="report-table" style="margin-bottom:1rem">
+          <thead><tr><th>Product</th><th style="text-align:right">Total Needed</th></tr></thead>
+          <tbody><tr><td colspan="2" style="color:var(--text-sub);font-size:0.82rem">No products supplied by me</td></tr></tbody>
+          <tfoot><tr>
+            <td style="font-weight:600">Water (spray solution)</td>
+            <td style="text-align:right;font-weight:600">${waterDisp}</td>
+          </tr></tfoot>
+        </table>`}
+        ${custProdRows ? `
+        <div style="font-size:0.75rem;font-weight:600;color:var(--accent2);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.35rem">Supplied by Customer</div>
+        <table class="report-table">
+          <thead><tr><th>Product</th><th style="text-align:right">Total Needed</th></tr></thead>
+          <tbody>${custProdRows}</tbody>
+        </table>` : ''}
+      </div>
+    </div>`;
 
   // ── SECTION 3: Map of all fields ─────────────────────────────────────────
-  // Collect all field IDs for the filtered orders
   const fieldIds = new Set();
   filtered.forEach(o => DB.orderFields.filter(f => f.OrderID === o.OrderID).forEach(f => fieldIds.add(f.FieldID)));
   const mapFields = [...fieldIds].map(id => DB.fields.find(f => f.FieldID === id)).filter(Boolean);
@@ -1861,7 +1941,7 @@ function renderReports() {
     </div>
 
     <div class="report-section">
-      <div class="report-section-title">Fields to Apply</div>
+      <div class="report-section-title">Fields to Apply <span style="font-size:0.72rem;font-weight:400;color:var(--text-sub)">· tap row to expand chemicals</span></div>
       <div style="overflow-x:auto">
         <table class="report-table">
           <thead><tr>
@@ -1877,20 +1957,7 @@ function renderReports() {
       </div>
     </div>
 
-    <div class="report-section">
-      <div class="report-section-title">Products Needed</div>
-      <div style="overflow-x:auto">
-        <table class="report-table">
-          <thead><tr><th>Product</th><th style="text-align:right">Total Needed</th><th>Note</th></tr></thead>
-          <tbody>${prodRows}</tbody>
-          <tfoot><tr>
-            <td style="font-weight:600">Water (spray solution)</td>
-            <td style="text-align:right;font-weight:600">${waterDisp}</td>
-            <td style="color:var(--text-sub)">at ${AppSettings.defaultSprayRate} gal/ac avg</td>
-          </tr></tfoot>
-        </table>
-      </div>
-    </div>
+    ${prodSection}
 
     ${hasMapData ? `
     <div class="report-section">
@@ -1899,9 +1966,21 @@ function renderReports() {
     </div>` : ''}
   `;
 
-  // Render the field map if we have data
   if (hasMapData) {
     setTimeout(() => renderReportMap(mapFields, filtered), 100);
+  }
+}
+
+function toggleReportChemDetail(orderId) {
+  const row = document.getElementById('chemDetail-' + orderId);
+  if (!row) return;
+  const isVisible = row.style.display !== 'none';
+  row.style.display = isVisible ? 'none' : 'table-row';
+  // Flip the arrow indicator on the parent row
+  const parentRow = row.previousElementSibling;
+  if (parentRow) {
+    const arrow = parentRow.querySelector('span[style*="0.65rem"]');
+    if (arrow) arrow.textContent = isVisible ? '▼' : '▲';
   }
 }
 
@@ -1909,10 +1988,8 @@ function renderReportMap(mapFields, orders) {
   const container = document.getElementById('reportMapContainer');
   if (!container) return;
 
-  // Use Leaflet for the report map
   if (typeof L === 'undefined') { container.innerHTML = '<div class="empty-state">Map not available</div>'; return; }
 
-  // Clear any existing map
   if (window._reportMap) { window._reportMap.remove(); window._reportMap = null; }
 
   window._reportMap = L.map(container, { zoomControl: true });
@@ -1925,10 +2002,24 @@ function renderReportMap(mapFields, orders) {
     { maxZoom: 19, opacity: 0.7 }
   ).addTo(window._reportMap);
 
+  // Build a map from FieldID → order (first match is fine for coloring)
+  const fieldToOrder = {};
+  orders.forEach(o => {
+    DB.orderFields.filter(of => of.OrderID === o.OrderID).forEach(of => {
+      if (!fieldToOrder[of.FieldID]) fieldToOrder[of.FieldID] = o;
+    });
+  });
+
   const bounds = [];
+  let drawnCount = 0;
+
   mapFields.forEach(f => {
-    const order = orders.find(o => DB.orderFields.some(of => of.OrderID === o.OrderID && of.FieldID === f.FieldID));
-    const color = order?.Status === 'Completed' ? '#81C784' : order?.Status === 'Scheduled' ? '#4FC3F7' : '#FFB74D';
+    if (!f) return;
+    const order = fieldToOrder[f.FieldID];
+    const color = !order ? '#FFB74D'
+      : order.Status === 'Completed' ? '#81C784'
+      : order.Status === 'Scheduled' ? '#4FC3F7'
+      : '#FFB74D';
 
     if (f.PolygonKML) {
       const pts = GeoUtils.parsePolygon(f.PolygonKML);
@@ -1938,13 +2029,20 @@ function renderReportMap(mapFields, orders) {
           .bindTooltip(`${f.FieldName} · ${f.Acres || '?'} ac`, { permanent: false })
           .addTo(window._reportMap);
         latlngs.forEach(ll => bounds.push(ll));
+        drawnCount++;
+        return;
       }
-    } else if (f.CentroidLat && f.CentroidLng) {
+    }
+    // Fallback: centroid marker
+    if (f.CentroidLat && f.CentroidLng) {
       const ll = [parseFloat(f.CentroidLat), parseFloat(f.CentroidLng)];
-      L.circleMarker(ll, { color, radius: 8, fillColor: color, fillOpacity: 0.6 })
-        .bindTooltip(`${f.FieldName} · ${f.Acres || '?'} ac`)
-        .addTo(window._reportMap);
-      bounds.push(ll);
+      if (!isNaN(ll[0]) && !isNaN(ll[1])) {
+        L.circleMarker(ll, { color, radius: 8, fillColor: color, fillOpacity: 0.6 })
+          .bindTooltip(`${f.FieldName} · ${f.Acres || '?'} ac`)
+          .addTo(window._reportMap);
+        bounds.push(ll);
+        drawnCount++;
+      }
     }
   });
 
@@ -1985,7 +2083,6 @@ function renderReportMap(mapFields, orders) {
     `, { maxWidth: 180 }).openPopup();
   });
 
-  // Show instructions
   const mapHint = document.createElement('div');
   mapHint.style.cssText = 'position:absolute;bottom:8px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.6);color:#fff;font-size:0.72rem;padding:4px 10px;border-radius:12px;pointer-events:none;z-index:1000';
   mapHint.textContent = 'Click map to drop a pin for directions';
@@ -2012,6 +2109,7 @@ function showNewOrderModal() {
   document.getElementById('fInvoiced').value = 'No';
   document.getElementById('chemicalLines').innerHTML = '';
   document.getElementById('fTemplate').value = '';
+  document.getElementById('btnDeleteOrder').style.display = 'none';
 
   renderOrderFieldsList();
   populateModalDropdowns();
@@ -2055,10 +2153,9 @@ function editCurrentOrder() {
   document.getElementById('chemicalLines').innerHTML = '';
   prods.forEach(p => addChemicalLine(p));
 
+  document.getElementById('btnDeleteOrder').style.display = '';
   openModal('orderModal');
 }
-
-function populateModalDropdowns() {
   // Customers
   const custSel = document.getElementById('fCustomer');
   custSel.innerHTML = '<option value="">— Select customer —</option>' +
@@ -2129,6 +2226,7 @@ async function saveOrder() {
   const totalAcres = orderFieldsSelected.reduce((s, f) => s + parseFloat(f.Acres || 0), 0);
   const ratePerAcre = parseFloat(document.getElementById('fRatePerAcre').value) || 0;
   const pricingType = document.getElementById('fPricingType').value;
+  const scheduledDate = document.getElementById('fScheduledDate').value;
 
   // Collect chemical lines
   const lines = [];
@@ -2160,6 +2258,16 @@ async function saveOrder() {
     ? ratePerAcre * totalAcres + chemCost
     : ratePerAcre * totalAcres;
 
+  // Auto-status logic: future scheduled date → Scheduled; cleared date → revert to Open
+  let status = document.getElementById('fStatus').value;
+  if (scheduledDate) {
+    const today = new Date(); today.setHours(0,0,0,0);
+    const sched = new Date(scheduledDate + 'T12:00:00');
+    if (sched >= today && status === 'Open') status = 'Scheduled';
+  } else {
+    if (status === 'Scheduled') status = 'Open';
+  }
+
   const order = {
     OrderID: orderId,
     OrderDate: editId ? toDateStr(DB.orders.find(o => o.OrderID === editId)?.OrderDate || new Date().toISOString().split('T')[0]) : new Date().toISOString().split('T')[0],
@@ -2168,11 +2276,11 @@ async function saveOrder() {
     CropType: document.getElementById('fCropType').value,
     PlantingDate: document.getElementById('fPlantingDate').value,
     RelativeMaturity: document.getElementById('fRelativeMaturity').value,
-    ScheduledDate: document.getElementById('fScheduledDate').value,
+    ScheduledDate: scheduledDate,
     CompletedDate: editId ? (DB.orders.find(o => o.OrderID === editId)?.CompletedDate || '') : '',
     PilotID: document.getElementById('fPilot').value,
     PilotName: document.getElementById('fPilot').selectedOptions[0]?.text || '',
-    Status: document.getElementById('fStatus').value,
+    Status: status,
     PricingType: pricingType,
     RatePerAcre: ratePerAcre,
     TotalAcres: totalAcres,
@@ -2185,40 +2293,75 @@ async function saveOrder() {
     Notes: document.getElementById('fNotes').value
   };
 
-  // Upsert order
+  const originalStatus = document.getElementById('fStatus').value;
+
+  // ── Optimistic UI: update local state and close modal immediately ──────────
   const existIdx = DB.orders.findIndex(o => o.OrderID === orderId);
   if (existIdx > -1) DB.orders[existIdx] = order; else DB.orders.push(order);
-  await writeRow('orders', order);
 
-  // Save orderFields lines
-  if (editId) {
-    // Remove old orderFields for this order
-    const old = DB.orderFields.filter(f => f.OrderID === orderId);
-    for (const f of old) await writeRow('orderFields', { LineID: f.LineID, _delete: true });
-    DB.orderFields = DB.orderFields.filter(f => f.OrderID !== orderId);
-  }
-  for (let i = 0; i < orderFieldsSelected.length; i++) {
-    const f = orderFieldsSelected[i];
-    const line = { LineID: `OFL-${orderId}-${i}`, OrderID: orderId, FieldID: f.FieldID, FieldName: f.FieldName, CustomerID: custId, Acres: f.Acres, Notes: '' };
-    DB.orderFields.push(line);
-    await writeRow('orderFields', line);
-  }
+  // Update orderFields in local state
+  const newOrderFields = orderFieldsSelected.map((f, i) => ({
+    LineID: `OFL-${orderId}-${i}`, OrderID: orderId,
+    FieldID: f.FieldID, FieldName: f.FieldName, CustomerID: custId, Acres: f.Acres, Notes: ''
+  }));
+  const oldOrderFields = editId ? DB.orderFields.filter(f => f.OrderID === orderId) : [];
+  if (editId) DB.orderFields = DB.orderFields.filter(f => f.OrderID !== orderId);
+  newOrderFields.forEach(f => DB.orderFields.push(f));
 
-  // Save/delete chemical lines
-  if (editId) {
-    const oldProds = DB.orderProds.filter(p => p.OrderID === orderId);
-    for (const p of oldProds) await writeRow('orderProds', { LineID: p.LineID, _delete: true });
-    DB.orderProds = DB.orderProds.filter(p => p.OrderID !== orderId);
-  }
-  for (const line of lines) {
-    DB.orderProds.push(line);
-    await writeRow('orderProds', line);
-  }
+  // Update orderProds in local state
+  const oldOrderProds = editId ? DB.orderProds.filter(p => p.OrderID === orderId) : [];
+  if (editId) DB.orderProds = DB.orderProds.filter(p => p.OrderID !== orderId);
+  lines.forEach(l => DB.orderProds.push(l));
 
   saveToLocalStorage();
   closeModal();
   renderView(currentView);
-  showToast(editId ? 'Order updated' : 'Order created', 'success');
+  showToast((editId ? 'Order updated' : 'Order created') + (status !== originalStatus ? ' · Status → ' + status : ''), 'success');
+
+  // ── Background: fire all sheet writes in parallel where possible ───────────
+  const writes = [];
+
+  // 1. Write the order row
+  writes.push(writeRow('orders', order));
+
+  // 2. Delete old orderFields and orderProds in parallel
+  const deletions = [
+    ...oldOrderFields.map(f => writeRow('orderFields', { LineID: f.LineID, _delete: true })),
+    ...oldOrderProds.map(p => writeRow('orderProds',   { LineID: p.LineID, _delete: true })),
+  ];
+  await Promise.all([...writes, ...deletions]);
+
+  // 3. Insert new orderFields and orderProds in parallel
+  await Promise.all([
+    ...newOrderFields.map(f => writeRow('orderFields', f)),
+    ...lines.map(l => writeRow('orderProds', l)),
+  ]);
+}
+
+// ── DELETE ORDER ─────────────────────────────────────────────────────────────
+async function deleteOrder() {
+  const editId = document.getElementById('editOrderId').value;
+  if (!editId) return;
+  if (!confirm(`Delete order ${editId}? This will also remove all linked field and chemical records. This cannot be undone.`)) return;
+
+  // Remove from local state
+  const orderFields = DB.orderFields.filter(f => f.OrderID === editId);
+  const orderProds  = DB.orderProds.filter(p => p.OrderID === editId);
+  DB.orders      = DB.orders.filter(o => o.OrderID !== editId);
+  DB.orderFields = DB.orderFields.filter(f => f.OrderID !== editId);
+  DB.orderProds  = DB.orderProds.filter(p => p.OrderID !== editId);
+
+  saveToLocalStorage();
+  closeModal();
+  navigateTo('orders');
+  showToast(`Order ${editId} deleted`, 'success');
+
+  // Background: delete all related rows in parallel
+  await Promise.all([
+    writeRow('orders', { OrderID: editId, _delete: true }),
+    ...orderFields.map(f => writeRow('orderFields', { LineID: f.LineID, _delete: true })),
+    ...orderProds.map(p => writeRow('orderProds',   { LineID: p.LineID, _delete: true })),
+  ]);
 }
 
 // ── WRITE TO SHEET ───────────────────────────────────────────────────────────

@@ -165,6 +165,9 @@
         <option value="Scheduled">Scheduled</option>
         <option value="Completed">Completed</option>
       </select>
+      <select class="filter-select" id="filterCrop" onchange="filterOrders()">
+        <option value="">All Crops</option>
+      </select>
       <select class="filter-select" id="filterInvoiced" onchange="filterOrders()">
         <option value="">All</option>
         <option value="No">Uninvoiced</option>
@@ -334,7 +337,7 @@
         <label class="form-label">Status</label>
         <select class="form-input" id="reportStatus" onchange="renderReports()">
           <option value="">All</option>
-          <option value="Scheduled">Scheduled</option>
+          <option value="Scheduled" selected>Scheduled</option>
           <option value="Open">Open</option>
           <option value="Completed">Completed</option>
         </select>
@@ -421,7 +424,7 @@
       <div class="form-group"><label class="form-label">Attachment Folder Link</label><input class="form-input" type="url" id="fAttachments" placeholder="Paste Drive folder URL"></div>
     </div>
   </div>
-  <div class="modal-footer"><button class="btn-ghost" onclick="closeModal()">Cancel</button><button class="btn-primary" onclick="saveOrder()">Save Order</button></div>
+  <div class="modal-footer"><button class="btn-danger-ghost" id="btnDeleteOrder" onclick="deleteOrder()" style="display:none;margin-right:auto">Delete Order</button><button class="btn-ghost" onclick="closeModal()">Cancel</button><button class="btn-primary" id="btnSaveOrder" onclick="saveOrder()">Save Order</button></div>
 </div>
 
 <div class="modal" id="customerModal">
