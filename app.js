@@ -2156,6 +2156,8 @@ function editCurrentOrder() {
   document.getElementById('btnDeleteOrder').style.display = '';
   openModal('orderModal');
 }
+
+function populateModalDropdowns() {
   // Customers
   const custSel = document.getElementById('fCustomer');
   custSel.innerHTML = '<option value="">— Select customer —</option>' +
