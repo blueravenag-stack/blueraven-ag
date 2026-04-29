@@ -1985,6 +1985,25 @@ function toggleReportChemDetail(orderId) {
     const arrow = parentRow.querySelector('span[style*="0.65rem"]');
     if (arrow) arrow.textContent = isVisible ? '▼' : '▲';
   }
+
+  // Zoom report map to this order's fields when expanding
+  if (!isVisible && window._reportMap) {
+    const orderFields = DB.orderFields.filter(f => f.OrderID === orderId);
+    const bounds = [];
+    orderFields.forEach(of => {
+      const field = DB.fields.find(f => f.FieldID === of.FieldID);
+      if (!field) return;
+      if (field.PolygonKML) {
+        const rings = GeoUtils.parseKMLAllRings(field.PolygonKML);
+        rings.forEach(pts => pts.forEach(p => bounds.push([p.lat, p.lng])));
+      } else if (field.CentroidLat && field.CentroidLng) {
+        bounds.push([parseFloat(field.CentroidLat), parseFloat(field.CentroidLng)]);
+      }
+    });
+    if (bounds.length) {
+      window._reportMap.fitBounds(bounds, { padding: [40, 40], maxZoom: 16 });
+    }
+  }
 }
 
 function renderReportMap(mapFields, orders) {
