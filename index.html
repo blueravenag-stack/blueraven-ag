@@ -154,7 +154,10 @@
       <div>
         <h1 class="view-title">Orders</h1>
       </div>
-      <button class="btn-primary" onclick="showNewOrderModal()">+ New Order</button>
+      <div style="display:flex;gap:0.5rem">
+        <button class="btn-secondary" id="btnBatchToggle" onclick="toggleBatchMode()">☑ Select</button>
+        <button class="btn-primary" onclick="showNewOrderModal()">+ New Order</button>
+      </div>
     </div>
 
     <div class="filter-bar">
@@ -173,6 +176,25 @@
         <option value="No">Uninvoiced</option>
         <option value="Yes">Invoiced</option>
       </select>
+    </div>
+
+    <!-- Batch action bar — hidden until batch mode active -->
+    <div class="batch-bar" id="batchBar" style="display:none">
+      <span class="batch-count" id="batchCount">0 selected</span>
+      <div class="batch-actions">
+        <select class="filter-select" id="batchPilot" style="min-width:130px">
+          <option value="">— Assign Pilot —</option>
+        </select>
+        <input class="filter-input" type="date" id="batchDate" style="max-width:150px">
+        <select class="filter-select" id="batchStatus" style="min-width:130px">
+          <option value="">— Set Status —</option>
+          <option value="Open">Open</option>
+          <option value="Scheduled">Scheduled</option>
+          <option value="Completed">Completed</option>
+        </select>
+        <button class="btn-primary" onclick="applyBatchEdit()">Apply</button>
+        <button class="btn-ghost" onclick="toggleBatchMode()">Cancel</button>
+      </div>
     </div>
 
     <div id="ordersList" class="order-list"></div>
@@ -254,6 +276,26 @@
         <div class="calc-panel">
           <h3 class="panel-title">Select Orders</h3>
           <p class="panel-sub">Select orders to calculate combined chemical quantities and tank loads.</p>
+          <!-- Calc filters -->
+          <div class="calc-filter-bar">
+            <select class="filter-select" id="calcFilterCustomer" onchange="renderOrderCalc()" style="flex:1;min-width:120px">
+              <option value="">All Customers</option>
+            </select>
+            <select class="filter-select" id="calcFilterCrop" onchange="renderOrderCalc()" style="flex:1;min-width:100px">
+              <option value="">All Crops</option>
+            </select>
+            <select class="filter-select" id="calcFilterStatus" onchange="renderOrderCalc()" style="flex:1;min-width:110px">
+              <option value="">All Statuses</option>
+              <option value="Open">Open</option>
+              <option value="Scheduled">Scheduled</option>
+              <option value="Completed">Completed</option>
+            </select>
+            <div style="display:flex;gap:0.4rem;align-items:center;flex:1;min-width:220px">
+              <input class="filter-input" type="date" id="calcFilterDateFrom" onchange="renderOrderCalc()" placeholder="From" style="flex:1">
+              <span style="color:var(--text-sub);font-size:0.8rem">–</span>
+              <input class="filter-input" type="date" id="calcFilterDateTo" onchange="renderOrderCalc()" placeholder="To" style="flex:1">
+            </div>
+          </div>
           <div id="calcOrderList" class="calc-order-list"></div>
           <div style="display:flex;gap:0.75rem;flex-wrap:wrap;margin-top:0.75rem">
             <div class="calc-tank" style="flex:1;min-width:100px">
@@ -357,9 +399,20 @@
         <p class="view-sub" style="font-size:0.82rem;color:var(--text-sub)">Corn only · Uses planting date + RM to predict ideal fungicide timing</p>
       </div>
     </div>
-    <div id="gduContent" class="gdu-container">
-      <div class="gdu-intro">
-        <p>Navigate to this tab to run analysis. Results are not calculated automatically to save data usage.</p>
+    <div class="tabs">
+      <button class="tab gdu-tab active" onclick="switchGDUTab('cards', this)">Field Cards</button>
+      <button class="tab gdu-tab" onclick="switchGDUTab('timeline', this)">📅 Timeline</button>
+    </div>
+    <div id="gduTab-cards" class="tab-content active">
+      <div id="gduContent" class="gdu-container">
+        <div class="gdu-intro">
+          <p>Navigate to this tab to run analysis. Results are not calculated automatically to save data usage.</p>
+        </div>
+      </div>
+    </div>
+    <div id="gduTab-timeline" class="tab-content">
+      <div id="gduTimeline" class="gdu-container">
+        <div class="empty-state">Run GDU Analysis on the Field Cards tab first.</div>
       </div>
     </div>
   </div>

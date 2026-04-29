@@ -860,3 +860,48 @@ body.light .leaflet-container { background: #e8e8e8; }
 .map-sel-name:hover { border-bottom-color: var(--accent); }
 .map-sel-name:focus { outline: none; border-bottom-color: var(--accent); background: var(--bg3); border-radius: 2px; padding: 0 2px; }
 .map-sel-acres { color: var(--text-sub); white-space: nowrap; font-size: 0.78rem; margin: 0 0.3rem; }
+
+/* ── BATCH EDIT ── */
+.batch-bar { display:flex; align-items:center; gap:0.75rem; flex-wrap:wrap; background:var(--bg2); border:1px solid var(--accent); border-radius:var(--radius); padding:0.6rem 1rem; margin-bottom:0.75rem; box-shadow:var(--shadow); }
+.batch-count { font-weight:600; font-size:0.85rem; color:var(--accent); white-space:nowrap; }
+.batch-actions { display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center; flex:1; }
+.order-card.batch-mode { cursor:pointer; padding-left:0.6rem; }
+.order-card.batch-mode:hover { border-color:var(--accent); }
+.order-card.batch-selected { border-color:var(--accent); background:rgba(79,195,247,0.08); }
+.batch-check { width:20px; height:20px; border:2px solid var(--accent); border-radius:4px; display:flex; align-items:center; justify-content:center; font-size:0.85rem; color:var(--accent); font-weight:700; flex-shrink:0; }
+.order-card.batch-selected .batch-check { background:var(--accent); color:#000; }
+
+/* ── CALC FILTER BAR ── */
+.calc-filter-bar { display:flex; gap:0.5rem; flex-wrap:wrap; margin-bottom:0.75rem; padding-bottom:0.75rem; border-bottom:1px solid var(--border); }
+
+/* ── GDU DATE PICKER ── */
+.gdu-date-picker { background:var(--bg3); border:1px solid var(--accent); border-radius:var(--radius); padding:0.6rem 0.75rem; margin-top:0.5rem; }
+.gdu-date-picker-label { font-size:0.75rem; color:var(--text-sub); margin-bottom:0.5rem; }
+.gdu-date-scroll { display:flex; gap:0.4rem; overflow-x:auto; padding-bottom:0.3rem; scroll-snap-type:x mandatory; }
+.gdu-date-scroll::-webkit-scrollbar { height:4px; }
+.gdu-date-scroll::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
+.gdu-date-option { flex-shrink:0; scroll-snap-align:center; padding:0.4rem 0.7rem; background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius); font-size:0.8rem; color:var(--text); cursor:pointer; white-space:nowrap; transition:border-color 0.15s, background 0.15s; }
+.gdu-date-option:hover { border-color:var(--accent); color:var(--accent); }
+.gdu-date-option.target { border-color:var(--accent); background:rgba(79,195,247,0.12); font-weight:600; }
+.gdu-date-option.current { border-color:var(--accent2); background:rgba(129,199,132,0.12); }
+
+/* ── GDU TIMELINE ── */
+.tl-wrap { background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius); padding:1.25rem; box-shadow:var(--shadow); }
+.tl-section-title { font-size:0.7rem; font-weight:600; text-transform:uppercase; letter-spacing:0.1em; color:var(--text-sub); margin-bottom:0.75rem; }
+.tl-chart { display:flex; flex-direction:column; gap:0; }
+.tl-rows { display:flex; flex-direction:column; gap:0.5rem; margin-bottom:0.5rem; }
+.tl-row { display:flex; align-items:center; gap:0.75rem; }
+.tl-label { width:130px; flex-shrink:0; font-size:0.75rem; font-weight:500; line-height:1.25; text-align:right; }
+.tl-bar-wrap { flex:1; height:20px; background:var(--bg3); border-radius:4px; position:relative; }
+.tl-window { position:absolute; top:2px; height:16px; background:rgba(255,183,77,0.35); border:1px solid var(--warn); border-radius:3px; }
+.tl-target { position:absolute; top:-2px; width:3px; height:24px; background:var(--accent); border-radius:2px; transform:translateX(-50%); }
+.tl-scheduled { position:absolute; top:-2px; width:3px; height:24px; background:var(--accent2); border-radius:2px; transform:translateX(-50%); }
+.tl-today { position:absolute; top:-4px; width:2px; height:28px; background:var(--danger); opacity:0.8; transform:translateX(-50%); }
+.tl-axis { position:relative; height:20px; margin-left:205px; }
+.tl-tick { position:absolute; font-size:0.62rem; color:var(--text-sub); transform:translateX(-50%); white-space:nowrap; }
+.tl-acres-chart { display:flex; flex-direction:column; }
+.tl-acres-bars { height:80px; position:relative; margin-left:205px; background:var(--bg3); border-radius:4px; }
+.tl-acre-bar { position:absolute; bottom:0; width:6px; background:var(--accent2); border-radius:2px 2px 0 0; transform:translateX(-50%); transition:height 0.3s; }
+.tl-acre-bar:hover { background:var(--accent); }
+.tl-acre-label { position:absolute; top:-18px; left:50%; transform:translateX(-50%); font-size:0.6rem; color:var(--text-sub); white-space:nowrap; }
+@media (max-width:640px) { .tl-label { width:80px; font-size:0.68rem; } .tl-axis { margin-left:155px; } .tl-acres-bars { margin-left:155px; } }

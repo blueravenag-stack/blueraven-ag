@@ -44,6 +44,8 @@ let currentView = 'dashboard';
 let previousView = 'dashboard';
 let currentOrderId = null;
 let selectedCalcOrders = new Set();
+let batchMode = false;
+let selectedBatchOrders = new Set();
 
 // ── THEME ────────────────────────────────────────────────────────────────────
 function toggleTheme() {
@@ -251,10 +253,86 @@ function renderDashboard() {
 function renderOrdersList() {
   // Reset crop dropdown when navigating to orders (repopulate from fresh data)
   const cropSel = document.getElementById('filterCrop');
-  if (cropSel) {
-    cropSel.innerHTML = '<option value="">All Crops</option>';
+  if (cropSel) cropSel.innerHTML = '<option value="">All Crops</option>';
+  // Exit batch mode on navigate
+  if (batchMode) toggleBatchMode(true);
+  filterOrders();
+}
+
+// ── BATCH EDIT ───────────────────────────────────────────────────────────────
+function toggleBatchMode(forceOff) {
+  batchMode = forceOff ? false : !batchMode;
+  selectedBatchOrders.clear();
+  const bar  = document.getElementById('batchBar');
+  const btn  = document.getElementById('btnBatchToggle');
+  if (bar)  bar.style.display  = batchMode ? 'flex' : 'none';
+  if (btn)  btn.textContent    = batchMode ? '✕ Cancel' : '☑ Select';
+
+  if (batchMode) {
+    // Populate pilot dropdown
+    const pilotSel = document.getElementById('batchPilot');
+    if (pilotSel) {
+      pilotSel.innerHTML = '<option value="">— Assign Pilot —</option>' +
+        DB.pilots.filter(p => p.Active === 'Yes').map(p =>
+          `<option value="${p.PilotID}" data-name="${p.Name}">${p.Name}</option>`
+        ).join('');
+    }
   }
   filterOrders();
+}
+
+function toggleBatchOrder(orderId, el) {
+  if (!batchMode) return;
+  el.stopPropagation?.();
+  if (selectedBatchOrders.has(orderId)) selectedBatchOrders.delete(orderId);
+  else selectedBatchOrders.add(orderId);
+  const count = document.getElementById('batchCount');
+  if (count) count.textContent = `${selectedBatchOrders.size} selected`;
+  // Refresh just the checkbox state without full re-render
+  const card = document.querySelector(`.order-card[data-id="${orderId}"]`);
+  if (card) card.classList.toggle('batch-selected', selectedBatchOrders.has(orderId));
+}
+
+async function applyBatchEdit() {
+  if (selectedBatchOrders.size === 0) { showToast('No orders selected', 'error'); return; }
+  const pilotSel  = document.getElementById('batchPilot');
+  const dateVal   = document.getElementById('batchDate')?.value || '';
+  const statusVal = document.getElementById('batchStatus')?.value || '';
+  const pilotId   = pilotSel?.value || '';
+  const pilotName = pilotSel?.selectedOptions[0]?.dataset.name || '';
+
+  if (!pilotId && !dateVal && !statusVal) {
+    showToast('Set at least one field to apply', 'error'); return;
+  }
+
+  const ids = [...selectedBatchOrders];
+  let autoStatusCount = 0;
+
+  // Update local DB optimistically
+  ids.forEach(id => {
+    const o = DB.orders.find(x => x.OrderID === id);
+    if (!o) return;
+    if (pilotId)   { o.PilotID = pilotId; o.PilotName = pilotName; }
+    if (dateVal)   { o.ScheduledDate = dateVal; }
+    if (statusVal) { o.Status = statusVal; }
+    // Auto-status: future date on an Open order → Scheduled
+    if (dateVal && !statusVal) {
+      const today = new Date(); today.setHours(0,0,0,0);
+      const sched = new Date(dateVal + 'T12:00:00');
+      if (sched >= today && o.Status === 'Open') { o.Status = 'Scheduled'; autoStatusCount++; }
+    }
+  });
+
+  saveToLocalStorage();
+  toggleBatchMode(true);
+  renderView('orders');
+  showToast(`Updated ${ids.length} order${ids.length !== 1 ? 's' : ''}${autoStatusCount ? ` · ${autoStatusCount} auto-set to Scheduled` : ''}`, 'success');
+
+  // Background writes in parallel
+  await Promise.all(ids.map(id => {
+    const o = DB.orders.find(x => x.OrderID === id);
+    return o ? writeRow('orders', o) : Promise.resolve();
+  }));
 }
 
 function filterOrders() {
@@ -296,8 +374,13 @@ function orderCardHTML(o) {
   const acres = o.TotalAcres ? `${parseFloat(o.TotalAcres).toLocaleString()} ac` : '';
   const date  = o.ScheduledDate ? fmtDate(o.ScheduledDate) : '';
   const fieldNames = DB.orderFields.filter(f => f.OrderID === o.OrderID).map(f => f.FieldName).join(', ') || '—';
+  const isSelected = selectedBatchOrders.has(o.OrderID);
+  const clickHandler = batchMode
+    ? `onclick="toggleBatchOrder('${o.OrderID}', event)"`
+    : `onclick="viewOrder('${o.OrderID}')"`;
   return `
-  <div class="order-card" onclick="viewOrder('${o.OrderID}')">
+  <div class="order-card ${batchMode ? 'batch-mode' : ''} ${isSelected ? 'batch-selected' : ''}" data-id="${o.OrderID}" ${clickHandler}>
+    ${batchMode ? `<div class="batch-check">${isSelected ? '✓' : ''}</div>` : ''}
     <span class="order-id">${o.OrderID}</span>
     <div class="order-main">
       <div class="order-customer">${o.CustomerName}</div>
@@ -1311,7 +1394,42 @@ function switchCalcTab(tab, el) {
 
 // ── TAB 1: ORDER BATCH CALC ───────────────────────────────────────────────────
 function renderOrderCalc() {
-  const eligible = DB.orders.filter(o => DB.orderProds.some(p => p.OrderID === o.OrderID));
+  // Populate filter dropdowns once
+  const custSel = document.getElementById('calcFilterCustomer');
+  if (custSel && custSel.options.length <= 1) {
+    DB.customers.forEach(c => {
+      const o = document.createElement('option');
+      o.value = c.CustomerID; o.textContent = c.Name;
+      custSel.appendChild(o);
+    });
+  }
+  const cropSel = document.getElementById('calcFilterCrop');
+  if (cropSel && cropSel.options.length <= 1) {
+    [...new Set(DB.orders.map(o => o.CropType).filter(Boolean))].sort().forEach(c => {
+      const o = document.createElement('option');
+      o.value = c; o.textContent = c;
+      cropSel.appendChild(o);
+    });
+  }
+
+  // Apply filters
+  const custFilter   = document.getElementById('calcFilterCustomer')?.value || '';
+  const cropFilter   = document.getElementById('calcFilterCrop')?.value || '';
+  const statusFilter = document.getElementById('calcFilterStatus')?.value || '';
+  const dateFrom     = document.getElementById('calcFilterDateFrom')?.value || '';
+  const dateTo       = document.getElementById('calcFilterDateTo')?.value || '';
+
+  const eligible = DB.orders.filter(o => {
+    if (!DB.orderProds.some(p => p.OrderID === o.OrderID)) return false;
+    if (custFilter   && o.CustomerID !== custFilter) return false;
+    if (cropFilter   && o.CropType   !== cropFilter) return false;
+    if (statusFilter && o.Status     !== statusFilter) return false;
+    const d = o.ScheduledDate || o.OrderDate || '';
+    if (dateFrom && d && d < dateFrom) return false;
+    if (dateTo   && d && d > dateTo)   return false;
+    return true;
+  });
+
   document.getElementById('calcOrderList').innerHTML = eligible.length ?
     eligible.map(o => `
       <div class="calc-order-item" onclick="toggleCalcOrder('${o.OrderID}', this)">
@@ -1320,10 +1438,11 @@ function renderOrderCalc() {
           <div style="font-weight:500">${o.OrderID} — ${o.CustomerName}</div>
           <div style="font-size:0.75rem;color:var(--text-sub)">
             ${DB.orderFields.filter(f=>f.OrderID===o.OrderID).map(f=>f.FieldName).join(', ')||'—'} · ${o.TotalAcres||0} ac · ${o.CropType}
+            ${o.ScheduledDate ? ' · ' + fmtDate(o.ScheduledDate) : ''}
           </div>
         </div>
       </div>`).join('') :
-    '<div style="color:var(--text-sub);font-size:0.82rem">No orders with chemicals found</div>';
+    '<div style="color:var(--text-sub);font-size:0.82rem">No orders match filters</div>';
   runOrderCalc();
 }
 
@@ -1528,6 +1647,14 @@ function runMixCalc() {
 let gduResults  = [];   // cached results per session
 let gduRunning  = false;
 
+function switchGDUTab(tab, el) {
+  document.querySelectorAll('.gdu-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('#view-gdu .tab-content').forEach(t => t.classList.remove('active'));
+  if (el) el.classList.add('active');
+  document.getElementById('gduTab-' + tab).classList.add('active');
+  if (tab === 'timeline') renderGDUTimeline();
+}
+
 function renderGDU() {
   const container = document.getElementById('gduContent');
   if (!container) return;
@@ -1658,10 +1785,20 @@ function renderGDUCard(r) {
         <span class="gdu-window-lbl">Scheduled date</span>
         <span class="gdu-scheduled-val ${scheduledDate ? '' : 'unset'}">${scheduledDisp}</span>
       </div>
-      ${!schedMatchesTarget && r.targetDate ? `
-        <button class="btn-secondary gdu-set-btn" onclick="setGDUScheduledDate('${r.orderId}', '${r.targetDate}')">
-          Set to ${GDUCalc.fmtDate(r.targetDate)}
-        </button>` : schedMatchesTarget ? '<span style="color:var(--accent2);font-size:0.8rem">✓ Matches target</span>' : ''}
+      <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap">
+        <button class="btn-secondary gdu-set-btn" onclick="toggleGDUDatePicker('${r.orderId}')">
+          📅 Set Date
+        </button>
+        <button class="btn-secondary gdu-set-btn" onclick="emailGDUSummary('${r.orderId}')">
+          ✉ Email
+        </button>
+      </div>
+    </div>
+    <div class="gdu-date-picker" id="gduDatePicker-${r.orderId}" style="display:none">
+      <div class="gdu-date-picker-label">Select scheduled date · Target: <strong>${GDUCalc.fmtDate(r.targetDate)}</strong></div>
+      <div class="gdu-date-scroll" id="gduDateScroll-${r.orderId}">
+        ${buildGDUDateOptions(r.targetDate, scheduledDate)}
+      </div>
     </div>
 
     <div class="gdu-status ${urgency}">${statusMsg}${r.targetProjected ? ' <span style="color:var(--text-sub);font-size:0.78rem">(*projected beyond 14-day forecast)</span>' : ''}</div>
@@ -1703,11 +1840,197 @@ async function setGDUScheduledDate(orderId, date) {
   const o = DB.orders.find(x => x.OrderID === orderId);
   if (!o) return;
   o.ScheduledDate = date;
+  // Auto-promote to Scheduled if Open
+  if (o.Status === 'Open') {
+    const today = new Date(); today.setHours(0,0,0,0);
+    if (new Date(date + 'T12:00:00') >= today) o.Status = 'Scheduled';
+  }
   await writeRow('orders', o);
   saveToLocalStorage();
-  showToast(`Scheduled date set to ${GDUCalc.fmtDate(date)} for ${orderId}`, 'success');
-  // Re-render GDU cards to show updated scheduled date
+  showToast(`Scheduled ${GDUCalc.fmtDate(date)} for ${orderId}`, 'success');
   renderGDU();
+}
+
+function buildGDUDateOptions(targetDate, currentDate) {
+  if (!targetDate) return '<div style="color:var(--text-sub);font-size:0.82rem;padding:0.5rem">No target date available</div>';
+  const options = [];
+  for (let d = -7; d <= 7; d++) {
+    const date = GDUCalc.addDays(targetDate, d);
+    const label = GDUCalc.fmtDate(date);
+    const isTarget = d === 0;
+    const isCurrent = date === currentDate;
+    options.push(`
+      <button class="gdu-date-option ${isTarget ? 'target' : ''} ${isCurrent ? 'current' : ''}"
+        onclick="selectGDUDate(event, '${date}')" data-date="${date}">
+        ${label}${isTarget ? ' 🎯' : ''}${isCurrent ? ' ✓' : ''}
+      </button>`);
+  }
+  return options.join('');
+}
+
+function toggleGDUDatePicker(orderId) {
+  const picker = document.getElementById('gduDatePicker-' + orderId);
+  if (!picker) return;
+  const isOpen = picker.style.display !== 'none';
+  // Close all other pickers first
+  document.querySelectorAll('.gdu-date-picker').forEach(p => p.style.display = 'none');
+  picker.style.display = isOpen ? 'none' : 'block';
+  if (!isOpen) {
+    // Scroll target date into view
+    const target = picker.querySelector('.gdu-date-option.target');
+    if (target) setTimeout(() => target.scrollIntoView({ inline: 'center', behavior: 'smooth' }), 50);
+    // Store orderId for selectGDUDate
+    picker.dataset.orderId = orderId;
+  }
+}
+
+async function selectGDUDate(e, date) {
+  e.stopPropagation();
+  // Find parent picker to get orderId
+  const picker = e.target.closest('.gdu-date-picker');
+  const orderId = picker?.dataset.orderId;
+  if (!orderId) return;
+  picker.style.display = 'none';
+  await setGDUScheduledDate(orderId, date);
+}
+
+function emailGDUSummary(orderId) {
+  const r = gduResults.find(x => x.orderId === orderId);
+  if (!r) return;
+  const order = DB.orders.find(o => o.OrderID === orderId);
+  const customer = DB.customers.find(c => c.CustomerID === order?.CustomerID);
+  const email = customer?.Email || '';
+
+  const subject = `Fungicide Timing Update — ${r.customerName} (${orderId})`;
+  const scheduled = order?.ScheduledDate ? GDUCalc.fmtDate(order.ScheduledDate) : 'Not yet scheduled';
+  const body = [
+    `Hi ${customer?.Name || r.customerName},`,
+    ``,
+    `Here is an update on fungicide timing for your corn fields:`,
+    ``,
+    `Order: ${orderId}`,
+    `Fields: ${r.fieldNames}`,
+    `Planted: ${GDUCalc.fmtDate(r.plantDate)}  |  RM: ${r.rm}`,
+    `Current GDU: ${r.currentGDU} of ${r.vtGDU} (${r.pctToVT}% to VT)`,
+    `Stage: ${r.stage}`,
+    ``,
+    `Fungicide Window:`,
+    `  Opens (VT):  ${GDUCalc.fmtDate(r.windowStart)}`,
+    `  Peak target: ${GDUCalc.fmtDate(r.targetDate)}${r.targetProjected ? ' (projected)' : ''}`,
+    `  Closes (R1): ${GDUCalc.fmtDate(r.windowEnd)}`,
+    ``,
+    `Your scheduled application date: ${scheduled}`,
+    ``,
+    `Please contact us if you have any questions.`,
+    ``,
+    `Blue Raven Ag Operations`,
+  ].join('\n');
+
+  window.location.href = `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+}
+
+// ── GDU TIMELINE VIEW ────────────────────────────────────────────────────────
+function renderGDUTimeline() {
+  const container = document.getElementById('gduTimeline');
+  if (!container) return;
+
+  if (!gduResults.length) {
+    container.innerHTML = '<div class="empty-state">Run GDU Analysis on the Field Cards tab first.</div>';
+    return;
+  }
+
+  const validResults = gduResults.filter(r => !r.error && r.windowStart && r.windowEnd);
+  if (!validResults.length) {
+    container.innerHTML = '<div class="empty-state">No valid results to display.</div>';
+    return;
+  }
+
+  // Determine timeline date bounds: earliest windowStart to latest windowEnd
+  const allDates = validResults.flatMap(r => [r.windowStart, r.windowEnd, r.targetDate].filter(Boolean));
+  const today = new Date().toISOString().split('T')[0];
+  allDates.push(today);
+  const minDate = allDates.reduce((a, b) => a < b ? a : b);
+  const maxDate = allDates.reduce((a, b) => a > b ? a : b);
+  const pad = 7; // days of padding each side
+  const chartStart = GDUCalc.addDays(minDate, -pad);
+  const chartEnd   = GDUCalc.addDays(maxDate,  pad);
+  const totalDays  = Math.round((new Date(chartEnd + 'T12:00:00') - new Date(chartStart + 'T12:00:00')) / 86400000);
+
+  function pct(dateStr) {
+    const d = Math.round((new Date(dateStr + 'T12:00:00') - new Date(chartStart + 'T12:00:00')) / 86400000);
+    return Math.max(0, Math.min(100, (d / totalDays) * 100));
+  }
+
+  // Build month labels
+  const monthLabels = [];
+  let cur = new Date(chartStart + 'T12:00:00');
+  const endD = new Date(chartEnd + 'T12:00:00');
+  while (cur <= endD) {
+    const label = cur.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    monthLabels.push({ label, pct: pct(cur.toISOString().split('T')[0]) });
+    cur.setDate(cur.getDate() + 7);
+  }
+
+  // Top chart: GDU windows
+  const windowRows = validResults.map(r => {
+    const order = DB.orders.find(o => o.OrderID === r.orderId);
+    const schedDate = order?.ScheduledDate || '';
+    const urgency = GDUCalc.urgencyClass(r);
+    const winLeft   = pct(r.windowStart).toFixed(1);
+    const winWidth  = (pct(r.windowEnd) - pct(r.windowStart)).toFixed(1);
+    const targLeft  = pct(r.targetDate).toFixed(1);
+    const todayLeft = pct(today).toFixed(1);
+    const schedLeft = schedDate ? pct(schedDate).toFixed(1) : null;
+
+    return `<div class="tl-row">
+      <div class="tl-label" title="${r.orderId}">${r.customerName}<br><span style="font-size:0.68rem;color:var(--text-sub)">${r.fieldNames}</span></div>
+      <div class="tl-bar-wrap">
+        <div class="tl-window" style="left:${winLeft}%;width:${winWidth}%" title="Fungicide window: ${GDUCalc.fmtDate(r.windowStart)} – ${GDUCalc.fmtDate(r.windowEnd)}"></div>
+        <div class="tl-target" style="left:${targLeft}%" title="Peak target: ${GDUCalc.fmtDate(r.targetDate)}"></div>
+        ${schedLeft !== null ? `<div class="tl-scheduled" style="left:${schedLeft}%" title="Scheduled: ${GDUCalc.fmtDate(schedDate)}"></div>` : ''}
+        <div class="tl-today" style="left:${todayLeft}%"></div>
+      </div>
+    </div>`;
+  }).join('');
+
+  // Bottom chart: scheduled acres per day
+  const acresByDate = {};
+  validResults.forEach(r => {
+    const order = DB.orders.find(o => o.OrderID === r.orderId);
+    const d = order?.ScheduledDate;
+    if (d) {
+      acresByDate[d] = (acresByDate[d] || 0) + parseFloat(order.TotalAcres || 0);
+    }
+  });
+  const maxAcres = Math.max(...Object.values(acresByDate), 1);
+  const acreBars = Object.entries(acresByDate).map(([d, ac]) => {
+    const left = pct(d).toFixed(1);
+    const height = Math.max(4, (ac / maxAcres) * 100).toFixed(0);
+    return `<div class="tl-acre-bar" style="left:${left}%;height:${height}%" title="${GDUCalc.fmtDate(d)}: ${ac.toFixed(0)} ac">
+      <div class="tl-acre-label">${ac.toFixed(0)}</div>
+    </div>`;
+  }).join('');
+
+  // Month tick marks
+  const ticks = monthLabels.map(m =>
+    `<div class="tl-tick" style="left:${m.pct.toFixed(1)}%">${m.label}</div>`
+  ).join('');
+
+  container.innerHTML = `
+    <div class="tl-wrap">
+      <div class="tl-section-title">Fungicide Windows <span style="font-size:0.72rem;font-weight:400">· <span style="color:var(--warn)">▓</span> window &nbsp; <span style="color:var(--accent)">|</span> target &nbsp; <span style="color:var(--accent2)">◆</span> scheduled &nbsp; <span style="color:var(--danger)">|</span> today</span></div>
+      <div class="tl-chart">
+        <div class="tl-rows">${windowRows}</div>
+        <div class="tl-axis">${ticks}</div>
+      </div>
+
+      <div class="tl-section-title" style="margin-top:1.5rem">Scheduled Acres by Date</div>
+      ${Object.keys(acresByDate).length ? `
+      <div class="tl-acres-chart">
+        <div class="tl-acres-bars">${acreBars}</div>
+        <div class="tl-axis">${ticks}</div>
+      </div>` : '<div style="color:var(--text-sub);font-size:0.82rem;padding:0.5rem 0">No scheduled dates set — use Field Cards to assign dates.</div>'}
+    </div>`;
 }
 
 async function runGDUAnalysis() {
@@ -1736,6 +2059,10 @@ async function runGDUAnalysis() {
   renderGDU();
   const lastRun = document.getElementById('gduLastRun');
   if (lastRun) lastRun.textContent = 'Updated ' + new Date().toLocaleTimeString();
+  // Refresh timeline if it's the active tab
+  if (document.getElementById('gduTab-timeline')?.classList.contains('active')) {
+    renderGDUTimeline();
+  }
 }
 
 // ── REPORTS / OPERATIONS ─────────────────────────────────────────────────────
