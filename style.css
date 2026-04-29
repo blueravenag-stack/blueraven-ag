@@ -825,7 +825,12 @@ body.light .leaflet-container { background: #e8e8e8; }
 .report-table tbody tr:hover { background:var(--bg3); }
 .report-table tfoot td { border-top:2px solid var(--border); border-bottom:none; }
 .report-map-container { height:480px; border-radius:var(--radius); overflow:hidden; border:1px solid var(--border); }
-@media (max-width:640px) { .report-map-container { height:300px; } }
+@media (max-width:640px) {
+  .report-map-container { height:300px; }
+  .report-table { font-size:0.75rem; }
+  .report-table th, .report-table td { padding:0.3rem 0.35rem; }
+  .report-col-hide-mobile { display:none; }
+}
 .report-row-expandable.has-chems { cursor:pointer; }
 .report-row-expandable.has-chems:hover { background:var(--bg3); }
 .report-chem-detail td { background:var(--bg-card,var(--bg2)); }

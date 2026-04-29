@@ -1851,11 +1851,11 @@ function renderReports() {
     const hasChems = prods.length > 0;
     return `<tr class="report-row-expandable ${hasChems ? 'has-chems' : ''}" ${hasChems ? `onclick="toggleReportChemDetail('${o.OrderID}')"` : ''} title="${hasChems ? 'Click to show chemical details' : ''}">
       <td>${o.ScheduledDate ? fmtDate(o.ScheduledDate) : fmtDate(o.OrderDate)}</td>
-      <td>${o.OrderID}</td>
+      <td class="report-col-hide-mobile">${o.OrderID}</td>
       <td>${o.CustomerName}</td>
       <td>${fields.map(f => f.FieldName).join(', ') || '—'}</td>
-      <td>${o.CropType || '—'}</td>
-      <td>${o.PilotName || '—'}</td>
+      <td class="report-col-hide-mobile">${o.CropType || '—'}</td>
+      <td class="report-col-hide-mobile">${o.PilotName || '—'}</td>
       <td>${statusBadge(o.Status)}</td>
       <td style="text-align:right">${ac > 0 ? ac.toFixed(1) : '—'}${hasChems ? ' <span style="font-size:0.65rem;color:var(--text-sub)">▼</span>' : ''}</td>
     </tr>${chemDetail}`;
@@ -1945,12 +1945,15 @@ function renderReports() {
       <div style="overflow-x:auto">
         <table class="report-table">
           <thead><tr>
-            <th>Date</th><th>Order</th><th>Customer</th><th>Fields</th>
-            <th>Crop</th><th>Pilot</th><th>Status</th><th style="text-align:right">Acres</th>
+            <th>Date</th><th class="report-col-hide-mobile">Order</th><th>Customer</th><th>Fields</th>
+            <th class="report-col-hide-mobile">Crop</th><th class="report-col-hide-mobile">Pilot</th><th>Status</th><th style="text-align:right">Acres</th>
           </tr></thead>
           <tbody>${fieldRows}</tbody>
           <tfoot><tr>
-            <td colspan="7" style="font-weight:600;padding-top:0.5rem">Total</td>
+            <td colspan="4" style="font-weight:600;padding-top:0.5rem">Total</td>
+            <td class="report-col-hide-mobile"></td>
+            <td class="report-col-hide-mobile"></td>
+            <td></td>
             <td style="text-align:right;font-weight:600">${totalAcres.toFixed(1)} ac</td>
           </tr></tfoot>
         </table>
@@ -2022,13 +2025,17 @@ function renderReportMap(mapFields, orders) {
       : '#FFB74D';
 
     if (f.PolygonKML) {
-      const pts = GeoUtils.parsePolygon(f.PolygonKML);
-      if (pts && pts.length >= 3) {
-        const latlngs = pts.map(p => [p.lat, p.lng]);
-        L.polygon(latlngs, { color, weight: 2, fillColor: color, fillOpacity: 0.3 })
-          .bindTooltip(`${f.FieldName} · ${f.Acres || '?'} ac`, { permanent: false })
-          .addTo(window._reportMap);
-        latlngs.forEach(ll => bounds.push(ll));
+      const rings = GeoUtils.parseKMLAllRings(f.PolygonKML);
+      if (rings.length) {
+        rings.forEach(pts => {
+          if (pts.length >= 3) {
+            const latlngs = pts.map(p => [p.lat, p.lng]);
+            L.polygon(latlngs, { color, weight: 2, fillColor: color, fillOpacity: 0.3 })
+              .bindTooltip(`${f.FieldName} · ${f.Acres || '?'} ac`, { permanent: false })
+              .addTo(window._reportMap);
+            latlngs.forEach(ll => bounds.push(ll));
+          }
+        });
         drawnCount++;
         return;
       }
