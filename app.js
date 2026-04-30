@@ -475,6 +475,28 @@ function viewOrder(orderId) {
   navigateTo('order-detail');
 }
 
+async function markComplete() {
+  const o = DB.orders.find(x => x.OrderID === currentOrderId);
+  if (!o) return;
+  if (o.Status === 'Completed') { showToast('Order already completed', 'error'); return; }
+  o.Status = 'Completed';
+  o.CompletedDate = new Date().toISOString().split('T')[0];
+  saveToLocalStorage();
+  viewOrder(currentOrderId);          // re-render detail with updated status
+  showToast('Order marked complete', 'success');
+  await writeRow('orders', o);
+}
+
+async function markInvoiced() {
+  const o = DB.orders.find(x => x.OrderID === currentOrderId);
+  if (!o) return;
+  if (o.Invoiced === 'Yes') { showToast('Order already invoiced', 'error'); return; }
+  o.Invoiced = 'Yes';
+  saveToLocalStorage();
+  viewOrder(currentOrderId);
+  showToast('Order marked invoiced', 'success');
+  await writeRow('orders', o);
+}
 
 function renderCustomers() {
   filterCustomers();
@@ -2581,7 +2603,15 @@ async function saveOrder() {
   const custId  = document.getElementById('fCustomer').value;
   const custName = document.getElementById('fCustomer').selectedOptions[0]?.text || '';
   const editId  = document.getElementById('editOrderId').value;
-  const orderId = editId || 'ORD-' + String(DB.orders.length + 1).padStart(3, '0');
+  // Generate a safe new ID by finding the highest existing ORD number and incrementing
+  const newOrderId = (() => {
+    const maxNum = DB.orders.reduce((max, o) => {
+      const n = parseInt((o.OrderID || '').replace('ORD-', ''), 10);
+      return isNaN(n) ? max : Math.max(max, n);
+    }, 0);
+    return 'ORD-' + String(maxNum + 1).padStart(3, '0');
+  })();
+  const orderId = editId || newOrderId;
 
   if (!custId) { showToast('Please select a customer', 'error'); return; }
   if (orderFieldsSelected.length === 0) { showToast('Please add at least one field', 'error'); return; }
