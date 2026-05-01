@@ -905,3 +905,6 @@ body.light .leaflet-container { background: #e8e8e8; }
 .tl-acre-bar:hover { background:var(--accent); }
 .tl-acre-label { position:absolute; top:-18px; left:50%; transform:translateX(-50%); font-size:0.6rem; color:var(--text-sub); white-space:nowrap; }
 @media (max-width:640px) { .tl-label { width:80px; font-size:0.68rem; } .tl-axis { margin-left:155px; } .tl-acres-bars { margin-left:155px; } }
+
+/* ── CUSTOMER MINI MAP ── */
+#cMiniMap .leaflet-container { background: var(--bg3); }

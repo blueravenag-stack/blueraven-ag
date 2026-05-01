@@ -502,7 +502,25 @@
       <div class="form-group"><label class="form-label">Zip</label><input class="form-input" type="text" id="cZip" maxlength="10" style="max-width:140px"></div>
     </div>
     <div class="form-section"><div class="form-section-title">Notes</div><div class="form-group"><label class="form-label">Notes</label><textarea class="form-input" id="cNotes" rows="2" placeholder="Payment terms, preferences..."></textarea></div></div>
-  </div>
+    <div class="form-section">
+      <div class="form-section-title">Map Location</div>
+      <div style="font-size:0.78rem;color:var(--text-sub);margin-bottom:0.5rem">
+        Set a map pin for this customer's farm area. This overrides address geocoding and ensures the map opens in the right location every time.
+      </div>
+      <div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;margin-bottom:0.5rem">
+        <span id="cMapStatus" style="font-size:0.8rem;color:var(--text-sub)">No pin set — will geocode from address</span>
+        <button class="btn-secondary" type="button" onclick="openCustomerMiniMap()" style="font-size:0.78rem;padding:0.3rem 0.7rem">📍 Set Pin</button>
+        <button class="btn-ghost" type="button" onclick="clearCustPin()" style="font-size:0.78rem;padding:0.3rem 0.7rem">✕ Clear</button>
+      </div>
+      <input type="hidden" id="cMapLat">
+      <input type="hidden" id="cMapLng">
+      <div id="cMiniMapWrap" style="display:none;border-radius:var(--radius);overflow:hidden;border:1px solid var(--border)">
+        <div id="cMiniMap" style="height:240px"></div>
+        <div id="cMapHint" style="display:none;font-size:0.72rem;color:var(--text-sub);padding:0.35rem 0.6rem;background:var(--bg2)">
+          Click to place pin · Drag pin to adjust · Save Customer to keep
+        </div>
+      </div>
+    </div>
   <div class="modal-footer">
     <button class="btn-danger-ghost" id="btnDeleteCustomer" onclick="deleteCustomer()" style="display:none;margin-right:auto">Delete</button>
     <button class="btn-ghost" onclick="closeModal()">Cancel</button>

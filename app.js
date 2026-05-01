@@ -530,10 +530,11 @@ function filterCustomers() {
 function showNewCustomerModal() {
   document.getElementById('editCustomerId').value = '';
   document.getElementById('customerModalTitle').textContent = 'New Customer';
-  ['cName','cPhone','cEmail','cAddress','cCity','cState','cZip','cNotes'].forEach(id => {
+  ['cName','cPhone','cEmail','cAddress','cCity','cState','cZip','cNotes','cMapLat','cMapLng'].forEach(id => {
     document.getElementById(id).value = '';
   });
   document.getElementById('btnDeleteCustomer').style.display = 'none';
+  resetCustomerMiniMap();
   openModal('customerModal');
 }
 
@@ -542,15 +543,18 @@ function editCustomer(customerId) {
   if (!c) return;
   document.getElementById('editCustomerId').value = c.CustomerID;
   document.getElementById('customerModalTitle').textContent = 'Edit Customer';
-  document.getElementById('cName').value    = c.Name;
-  document.getElementById('cPhone').value   = c.Phone;
-  document.getElementById('cEmail').value   = c.Email;
-  document.getElementById('cAddress').value = c.Address;
-  document.getElementById('cCity').value    = c.City;
-  document.getElementById('cState').value   = c.State;
-  document.getElementById('cZip').value     = c.Zip;
-  document.getElementById('cNotes').value   = c.Notes;
+  document.getElementById('cName').value    = c.Name    || '';
+  document.getElementById('cPhone').value   = c.Phone   || '';
+  document.getElementById('cEmail').value   = c.Email   || '';
+  document.getElementById('cAddress').value = c.Address || '';
+  document.getElementById('cCity').value    = c.City    || '';
+  document.getElementById('cState').value   = c.State   || '';
+  document.getElementById('cZip').value     = c.Zip     || '';
+  document.getElementById('cNotes').value   = c.Notes   || '';
+  document.getElementById('cMapLat').value  = c.MapCenterLat || '';
+  document.getElementById('cMapLng').value  = c.MapCenterLng || '';
   document.getElementById('btnDeleteCustomer').style.display = '';
+  updateCustomerMapStatus(c.MapCenterLat, c.MapCenterLng);
   openModal('customerModal');
 }
 
@@ -569,6 +573,8 @@ async function saveCustomer() {
     State:   document.getElementById('cState').value.trim().toUpperCase(),
     Zip:     document.getElementById('cZip').value.trim(),
     Notes:   document.getElementById('cNotes').value.trim(),
+    MapCenterLat: document.getElementById('cMapLat').value.trim(),
+    MapCenterLng: document.getElementById('cMapLng').value.trim(),
   };
 
   if (editId) {
@@ -599,7 +605,102 @@ async function deleteCustomer() {
   renderCustomers();
 }
 
-// ── PRODUCTS & MIXES ─────────────────────────────────────────────────────────
+// ── CUSTOMER MAP LOCATION PICKER ─────────────────────────────────────────────
+let _custMiniMap = null;
+let _custMiniPin = null;
+
+function updateCustomerMapStatus(lat, lng) {
+  const statusEl = document.getElementById('cMapStatus');
+  if (!statusEl) return;
+  if (lat && lng) {
+    statusEl.textContent = `📍 ${parseFloat(lat).toFixed(5)}, ${parseFloat(lng).toFixed(5)}`;
+    statusEl.style.color = 'var(--accent2)';
+  } else {
+    statusEl.textContent = 'No pin set — will geocode from address';
+    statusEl.style.color = 'var(--text-sub)';
+  }
+}
+
+function resetCustomerMiniMap() {
+  if (_custMiniMap) { _custMiniMap.remove(); _custMiniMap = null; _custMiniPin = null; }
+  document.getElementById('cMiniMapWrap').style.display = 'none';
+  updateCustomerMapStatus('', '');
+}
+
+async function openCustomerMiniMap() {
+  const wrap = document.getElementById('cMiniMapWrap');
+  wrap.style.display = 'block';
+
+  // Give DOM time to paint the container before init
+  await new Promise(r => setTimeout(r, 80));
+
+  const existLat = parseFloat(document.getElementById('cMapLat').value);
+  const existLng = parseFloat(document.getElementById('cMapLng').value);
+
+  // Try to get initial center: saved coords → geocode address → IL default
+  let centerLat = !isNaN(existLat) ? existLat : null;
+  let centerLng = !isNaN(existLng) ? existLng : null;
+
+  if (!centerLat) {
+    const addr = [
+      document.getElementById('cAddress').value,
+      document.getElementById('cCity').value,
+      document.getElementById('cState').value
+    ].filter(Boolean).join(', ');
+
+    if (addr) {
+      const geo = await GeoUtils.geocodeAddress(addr);
+      if (geo) { centerLat = geo.lat; centerLng = geo.lng; }
+    }
+    if (!centerLat) { centerLat = 39.17; centerLng = -90.10; } // Medora IL default
+  }
+
+  if (_custMiniMap) { _custMiniMap.remove(); _custMiniMap = null; _custMiniPin = null; }
+
+  _custMiniMap = L.map('cMiniMap', { zoomControl: true }).setView([centerLat, centerLng], 13);
+  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    { attribution: 'Imagery © Esri', maxZoom: 19 }).addTo(_custMiniMap);
+  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+    { maxZoom: 19, opacity: 0.7 }).addTo(_custMiniMap);
+
+  // Place pin if coords already set
+  if (!isNaN(existLat) && !isNaN(existLng)) {
+    _custMiniPin = L.marker([existLat, existLng], { draggable: true }).addTo(_custMiniMap);
+    _custMiniPin.on('dragend', onCustPinMoved);
+  }
+
+  // Click map to place/move pin
+  _custMiniMap.on('click', e => {
+    if (_custMiniPin) _custMiniMap.removeLayer(_custMiniPin);
+    _custMiniPin = L.marker(e.latlng, { draggable: true }).addTo(_custMiniMap);
+    _custMiniPin.on('dragend', onCustPinMoved);
+    setCustPinCoords(e.latlng.lat, e.latlng.lng);
+  });
+
+  setTimeout(() => _custMiniMap.invalidateSize(), 150);
+
+  // Show hint
+  document.getElementById('cMapHint').style.display = 'block';
+}
+
+function onCustPinMoved(e) {
+  const ll = e.target.getLatLng();
+  setCustPinCoords(ll.lat, ll.lng);
+}
+
+function setCustPinCoords(lat, lng) {
+  document.getElementById('cMapLat').value = lat.toFixed(6);
+  document.getElementById('cMapLng').value = lng.toFixed(6);
+  updateCustomerMapStatus(lat.toFixed(6), lng.toFixed(6));
+}
+
+function clearCustPin() {
+  if (_custMiniPin && _custMiniMap) _custMiniMap.removeLayer(_custMiniPin);
+  _custMiniPin = null;
+  document.getElementById('cMapLat').value = '';
+  document.getElementById('cMapLng').value = '';
+  updateCustomerMapStatus('', '');
+}
 function renderProducts() {
   // Products table — rows are clickable to edit
   document.getElementById('productsList').innerHTML = DB.products.length ?
@@ -1138,8 +1239,10 @@ function openMapForOrder() {
   const cust = DB.customers.find(c => c.CustomerID === custId);
   const addr = cust ? [cust.Address, cust.City, cust.State].filter(Boolean).join(', ') : '';
 
-  // Use centroid of already-selected fields as center if available
-  let centerLat, centerLng;
+  // Use saved map center coords if available — skips geocoding entirely
+  let centerLat = cust?.MapCenterLat ? parseFloat(cust.MapCenterLat) : null;
+  let centerLng = cust?.MapCenterLng ? parseFloat(cust.MapCenterLng) : null;
+  if (isNaN(centerLat)) centerLat = null;
   if (orderFieldsSelected.length) {
     const pts = orderFieldsSelected.flatMap(f => {
       const field = DB.fields.find(x => x.FieldID === f.FieldID);
@@ -1180,7 +1283,7 @@ function openMapForOrder() {
   MapModal.open({
     centerLat,
     centerLng,
-    customerAddress: addr,
+    customerAddress: (!centerLat) ? addr : '',
     preselected,
     customerFields,
     onConfirm: async (mapFields) => {
@@ -1312,6 +1415,10 @@ function openMapForField() {
   const existLat = parseFloat(document.getElementById('fFieldLat').value) || null;
   const existLng = parseFloat(document.getElementById('fFieldLng').value) || null;
 
+  // Use saved customer map center if no field coords yet
+  const custMapLat = (!existLat && cust?.MapCenterLat) ? parseFloat(cust.MapCenterLat) : null;
+  const custMapLng = (!existLat && cust?.MapCenterLng) ? parseFloat(cust.MapCenterLng) : null;
+
   // Build preselected from existing KML in the field form
   const existingKML = document.getElementById('fFieldKML')?.value || '';
   const existingPoints = existingKML ? GeoUtils.parsePolygon(existingKML) : null;
@@ -1328,9 +1435,9 @@ function openMapForField() {
   document.getElementById('fieldModal').style.display = 'none';
 
   MapModal.open({
-    centerLat:       existLat || (existingPoints ? GeoUtils.centroid(existingPoints)?.lat : null),
-    centerLng:       existLng || (existingPoints ? GeoUtils.centroid(existingPoints)?.lng : null),
-    customerAddress: addr,
+    centerLat:       existLat || custMapLat || (existingPoints ? GeoUtils.centroid(existingPoints)?.lat : null),
+    centerLng:       existLng || custMapLng || (existingPoints ? GeoUtils.centroid(existingPoints)?.lng : null),
+    customerAddress: (!existLat && !custMapLat) ? addr : '',
     preselected,
     onConfirm: (mapFields) => {
       // Restore field modal
