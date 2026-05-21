@@ -9,10 +9,11 @@ window.GDUCalc = (() => {
   const BASE_TEMP   = 50;  // °F — base temperature for corn GDU
   const MAX_TEMP    = 86;  // °F — ceiling temperature for corn GDU
   const GDU_PER_RM  = 13;  // GDU to reach VT per RM unit (IL empirical)
-  // Fungicide application window: 80–95% of GDU to VT (approaching tassel)
-  const FUNG_START  = 0.80;
-  const FUNG_TARGET = 0.90;
-  const FUNG_END    = 1.05; // R1-R2 is last effective timing
+  // GDU offsets from VT (fixed, not percentage-based)
+  const GDU_VT_TO_R1 = 60;   // VT → R1 silking (~2-3 days in mid-summer)
+  const GDU_VT_TO_R2 = 310;  // VT → R2 blister (60 + 250)
+  // Alert window starts at 80% of GDU to VT so pilot can schedule ahead
+  const FUNG_ALERT  = 0.80;
 
   // ── CORE GDU MATH ─────────────────────────────────────────────────────────
 
@@ -38,16 +39,17 @@ window.GDUCalc = (() => {
 
   function fungicideWindow(rm) {
     const vtGDU = gduToVT(rm);
-    // VT = tasseling = 100% of GDU to VT
-    // R1 = silking = ~105-110% of GDU to VT
-    // Ideal fungicide window: VT through R1
-    // Alert window starts at 80% (approaching tassel) so pilot can schedule
+    const r1GDU = vtGDU + GDU_VT_TO_R1;          // R1 silking (~60 GDU after VT)
+    const r2GDU = vtGDU + GDU_VT_TO_R2;          // R2 blister (~310 GDU after VT) — hard cutoff
+    // Ideal application: midpoint of VT→R1 (best disease protection, canopy access)
+    const targetGDU = Math.round(vtGDU + GDU_VT_TO_R1 / 2);  // ~30 GDU after VT
     return {
-      start:  Math.round(vtGDU * FUNG_START),   // 80% = early alert
-      target: Math.round(vtGDU * 1.0),           // 100% = VT, start applying
-      end:    Math.round(vtGDU * FUNG_END),       // 105% = R1, last chance
+      start:  Math.round(vtGDU * FUNG_ALERT),    // 80% of VT = early scheduling alert
+      target: targetGDU,                          // ideal = midpoint VT→R1
+      end:    r2GDU,                              // R2 = hard cutoff, last effective timing
       vtGDU,
-      r1GDU:  Math.round(vtGDU * 1.07),          // R1 definition for display
+      r1GDU,
+      r2GDU,
     };
   }
 
@@ -257,9 +259,11 @@ window.GDUCalc = (() => {
 
       const targetResult   = projectToTarget(withGDU, window.target, avgGDU);
       const windowStart    = projectToTarget(withGDU, window.start,  avgGDU);
-      const windowEnd      = projectToTarget(withGDU, window.end,    avgGDU);
+      const vtResult       = projectToTarget(withGDU, window.vtGDU,  avgGDU);
+      const r1Result       = projectToTarget(withGDU, window.r1GDU,  avgGDU);
+      const windowEnd      = projectToTarget(withGDU, window.r2GDU,  avgGDU);
 
-      // GDU progress as percentage
+      // GDU progress as percentage toward VT
       const pctToVT    = Math.min(100, Math.round(currentGDU / window.vtGDU * 100));
       const pctToTarget= Math.min(100, Math.round(currentGDU / window.target * 100));
 
@@ -283,14 +287,18 @@ window.GDUCalc = (() => {
         rm,
         currentGDU:    Math.round(currentGDU),
         vtGDU:         window.vtGDU,
+        r1GDU:         window.r1GDU,
+        r2GDU:         window.r2GDU,
         targetGDU:     window.target,
         windowStartGDU:window.start,
-        windowEndGDU:  window.end,
+        windowEndGDU:  window.r2GDU,
         pctToVT,
         pctToTarget,
         stage,
         windowStart:   windowStart?.date,
+        vtDate:        vtResult?.date,
         targetDate:    targetResult?.date,
+        r1Date:        r1Result?.date,
         windowEnd:     windowEnd?.date,
         targetProjected: targetResult?.projected,
         withGDU,
@@ -305,16 +313,18 @@ window.GDUCalc = (() => {
 
   function estimateStage(cumGDU, rm) {
     const vtGDU = gduToVT(rm);
+    const r1GDU = vtGDU + GDU_VT_TO_R1;
+    const r2GDU = vtGDU + GDU_VT_TO_R2;
     const pct   = cumGDU / vtGDU;
     if (pct < 0.15) return 'Emergence / V2';
     if (pct < 0.35) return 'V3–V5';
     if (pct < 0.55) return 'V6–V8';
     if (pct < 0.75) return 'V9–V12';
     if (pct < 0.88) return 'V13–V15 (approaching tassel)';
-    if (pct < 0.98) return '⚡ VT / Tasseling';
-    if (pct < 1.10) return 'R1 Silking';
-    if (pct < 1.25) return 'R2 Blister';
-    return 'R3+ (fungicide window closing)';
+    if (cumGDU < vtGDU) return '⚡ Pre-VT (schedule now)';
+    if (cumGDU < r1GDU) return '✅ VT — Ideal fungicide window';
+    if (cumGDU < r2GDU) return '⚠️ R1 Silking — apply soon';
+    return '🚫 R2+ Blister — window closed';
   }
 
   // ── HELPERS ───────────────────────────────────────────────────────────────
