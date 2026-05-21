@@ -25,6 +25,33 @@ let DB = {
 };
 
 // App settings — persisted to localStorage
+// ── PARAMS — loaded from params.json on GitHub Pages ────────────────────────
+let AppParams = {
+  crops: ['Corn', 'Soybeans', 'Wheat', 'Sorghum', 'Cotton', 'Other'],
+  orderStatuses: ['Open', 'Scheduled', 'Completed'],
+  pricingTypes: ['Flat Rate', 'Flat Rate + Chemical'],
+  suppliedByOptions: ['Me', 'Customer'],
+  defaultSprayRate: 2,
+  defaultTankSize: 100,
+  appName: 'Blue Raven Ag',
+  version: '4.2'
+};
+
+async function loadParams() {
+  try {
+    const res = await fetch('params.json?v=' + Date.now());
+    if (res.ok) {
+      const p = await res.json();
+      AppParams = { ...AppParams, ...p };
+      // Sync settings defaults from params
+      if (!localStorage.getItem('blueraven_settings')) {
+        AppSettings.defaultSprayRate = AppParams.defaultSprayRate;
+        AppSettings.defaultTankSize  = AppParams.defaultTankSize;
+      }
+    }
+  } catch(e) { console.warn('params.json not loaded, using defaults', e); }
+}
+
 let AppSettings = {
   defaultSprayRate: 2,   // gal/ac — used when template has no spray rate
   defaultTankSize:  100, // gallons
@@ -76,7 +103,7 @@ function loadTheme() {
 }
 
 // ── INIT ────────────────────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   loadTheme();
   document.getElementById('dashDate').textContent =
     new Date().toLocaleDateString('en-US', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
@@ -89,6 +116,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
+  await loadParams();   // load params.json before anything renders
   loadFromLocalStorage();
   syncData();
 });
@@ -126,6 +154,7 @@ function renderView(view) {
     case 'calculator': renderCalculator(); break;
     case 'reports':    renderReports(); break;
     case 'gdu':        renderGDU(); break;
+    case 'settings':   renderSettings(); break;
   }
 }
 
@@ -838,10 +867,12 @@ function showNewMixModal() {
   document.getElementById('editMixId').value = '';
   document.getElementById('mixModalTitle').textContent = 'New Mix Template';
   ['mName','mDescription'].forEach(id => document.getElementById(id).value = '');
-  document.getElementById('mCropType').value = 'Corn';
   document.getElementById('mActive').value = 'Yes';
   document.getElementById('mixChemLines').innerHTML = '';
   document.getElementById('btnDeleteMix').style.display = 'none';
+  // Populate crop type from AppParams
+  const cropSel = document.getElementById('mCropType');
+  if (cropSel) cropSel.innerHTML = ['General', ...AppParams.crops].map(c => `<option>${c}</option>`).join('');
   openModal('mixModal');
 }
 
@@ -1562,7 +1593,9 @@ function renderOrderCalc() {
   }
   const cropSel = document.getElementById('calcFilterCrop');
   if (cropSel && cropSel.options.length <= 1) {
-    [...new Set(DB.orders.map(o => o.CropType).filter(Boolean))].sort().forEach(c => {
+    // Use AppParams crops + any in-use crops not in the list
+    const allCrops = [...new Set([...AppParams.crops, ...DB.orders.map(o => o.CropType).filter(Boolean)])].sort();
+    allCrops.forEach(c => {
       const o = document.createElement('option');
       o.value = c; o.textContent = c;
       cropSel.appendChild(o);
@@ -1728,15 +1761,46 @@ function onMixCalcGalInput() {
 }
 
 function onMixCalcTemplateChange() {
-  // When template changes, update spray rate display and recalc
   const tmplId = document.getElementById('mixCalcTemplate')?.value;
   const tmpl   = DB.templates.find(t => t.TemplateID === tmplId);
   const rate   = parseFloat(tmpl?.SprayRate || 15);
   const rateEl = document.getElementById('mixCalcSprayRateDisplay');
   if (rateEl) rateEl.textContent = rate + ' gal/ac';
+  // Populate back-calc product dropdown
+  const backSel = document.getElementById('mixBackProduct');
+  if (backSel && tmplId) {
+    const prods = DB.templateProds.filter(p => p.TemplateID === tmplId);
+    backSel.innerHTML = '<option value="">— Pick product —</option>' +
+      prods.map(p => `<option value="${p.LineID}" data-rate="${p.RatePerAcre}" data-unit="${p.Unit}">${p.ProductName} (${p.RatePerAcre} ${p.Unit}/ac)</option>`).join('');
+    document.getElementById('mixBackAmount').value = '';
+    document.getElementById('mixBackUnit').textContent = '—';
+  }
   // Recalc from whichever was last changed
   if (mixCalcLastChanged === 'acres') onMixCalcAcresInput();
   else onMixCalcGalInput();
+}
+
+function onMixBackCalcInput() {
+  const sel    = document.getElementById('mixBackProduct');
+  const opt    = sel?.selectedOptions[0];
+  const rate   = parseFloat(opt?.dataset.rate || 0);
+  const unit   = opt?.dataset.unit || '—';
+  const amt    = parseFloat(document.getElementById('mixBackAmount')?.value || 0);
+  const unitEl = document.getElementById('mixBackUnit');
+  if (unitEl) unitEl.textContent = unit || '—';
+  if (!rate || !amt) { runMixCalc(); return; }
+  // Back-calc: if rate = R units/ac and we want T total units → acres = T/R
+  const acres   = amt / rate;
+  const tmplId  = document.getElementById('mixCalcTemplate')?.value;
+  const tmpl    = DB.templates.find(t => t.TemplateID === tmplId);
+  const galPerAc= parseFloat(tmpl?.SprayRate || 15);
+  const gallons = acres * galPerAc;
+  const acEl  = document.getElementById('mixCalcAcres');
+  const galEl = document.getElementById('mixCalcTotalGal');
+  if (acEl)  acEl.value  = acres.toFixed(1);
+  if (galEl) galEl.value = gallons.toFixed(0);
+  mixCalcLastChanged = 'acres';
+  runMixCalc();
 }
 
 function runMixCalc() {
@@ -1799,6 +1863,48 @@ function runMixCalc() {
     ${rows}`;
 }
 
+
+
+// ── SETTINGS ──────────────────────────────────────────────────────────────────
+function renderSettings() {
+  const el = document.getElementById('settingsContent');
+  if (!el) return;
+  el.innerHTML = `
+    <div class="detail-card" style="margin-bottom:1rem">
+      <div class="detail-section-title">App Defaults</div>
+      <div class="detail-row">
+        <span>Default Spray Rate (gal/ac)</span>
+        <input class="form-input" type="number" step="0.1" style="width:90px;text-align:right"
+          id="setSprayRate" value="${AppSettings.defaultSprayRate}" oninput="saveSettingsUI()">
+      </div>
+      <div class="detail-row">
+        <span>Default Tank Size (gal)</span>
+        <input class="form-input" type="number" step="1" style="width:90px;text-align:right"
+          id="setTankSize" value="${AppSettings.defaultTankSize}" oninput="saveSettingsUI()">
+      </div>
+    </div>
+    <div class="detail-card" style="margin-bottom:1rem">
+      <div class="detail-section-title">Crop List <span style="font-weight:400;font-size:0.78rem;color:var(--text-sub)">— one per line</span></div>
+      <textarea class="form-input" id="setCropList" rows="8" style="font-family:var(--font-mono);font-size:0.82rem" oninput="saveSettingsUI()">${AppParams.crops.join('\n')}</textarea>
+      <div style="font-size:0.75rem;color:var(--text-sub);margin-top:0.4rem">Changes take effect immediately. To make permanent, update <code>params.json</code> in GitHub.</div>
+    </div>
+    <div class="detail-card">
+      <div class="detail-section-title">About</div>
+      <div class="detail-row"><span>Version</span><span>${AppParams.version || '—'}</span></div>
+      <div class="detail-row"><span>Sheet ID</span><span style="font-family:var(--font-mono);font-size:0.75rem">${SHEET_ID}</span></div>
+    </div>
+  `;
+}
+
+function saveSettingsUI() {
+  const rate = parseFloat(document.getElementById('setSprayRate')?.value);
+  const tank = parseFloat(document.getElementById('setTankSize')?.value);
+  const crops = (document.getElementById('setCropList')?.value || '').split('\n').map(s => s.trim()).filter(Boolean);
+  if (!isNaN(rate)) AppSettings.defaultSprayRate = rate;
+  if (!isNaN(tank)) AppSettings.defaultTankSize  = tank;
+  if (crops.length) AppParams.crops = crops;
+  saveSettings();
+}
 
 // ── GDU FUNGICIDE PREDICTOR ──────────────────────────────────────────────────
 let gduResults  = [];   // cached results per session
@@ -2620,6 +2726,8 @@ function showNewOrderModal() {
     const el = document.getElementById(id);
     if (el) el.value = '';
   });
+  const phChk = document.getElementById('fUsePlaceholder');
+  if (phChk) { phChk.checked = false; togglePlaceholderFields(); }
   document.getElementById('fStatus').value = 'Open';
   document.getElementById('fPricingType').value = 'Flat Rate';
   document.getElementById('fCropType').value = 'Corn';
@@ -2671,7 +2779,23 @@ function editCurrentOrder() {
   prods.forEach(p => addChemicalLine(p));
 
   document.getElementById('btnDeleteOrder').style.display = '';
+  // Reset placeholder UI
+  const phChk = document.getElementById('fUsePlaceholder');
+  if (phChk) { phChk.checked = false; togglePlaceholderFields(); }
   openModal('orderModal');
+}
+
+
+function togglePlaceholderFields() {
+  const checked = document.getElementById('fUsePlaceholder')?.checked;
+  const phFields = document.getElementById('placeholderFields');
+  const mapBtns  = document.getElementById('orderMapButtons');
+  if (phFields) phFields.style.display = checked ? 'block' : 'none';
+  if (mapBtns)  mapBtns.style.display  = checked ? 'none'  : '';
+  if (checked) {
+    orderFieldsSelected = [];
+    renderOrderFieldsList();
+  }
 }
 
 function populateModalDropdowns() {
@@ -2689,6 +2813,10 @@ function populateModalDropdowns() {
   const tmplSel = document.getElementById('fTemplate');
   tmplSel.innerHTML = '<option value="">— Select template —</option>' +
     DB.templates.filter(t => t.Active === 'Yes').map(t => `<option value="${t.TemplateID}">${t.TemplateName} (${t.CropType})</option>`).join('');
+
+  // Crop type — from AppParams so it's editable via params.json
+  const cropSel = document.getElementById('fCropType');
+  if (cropSel) cropSel.innerHTML = AppParams.crops.map(c => `<option>${c}</option>`).join('');
 }
 
 function addChemicalLine(prefill) {
@@ -2748,7 +2876,27 @@ async function saveOrder() {
   const orderId = editId || newOrderId;
 
   if (!custId) { showToast('Please select a customer', 'error'); return; }
-  if (orderFieldsSelected.length === 0) { showToast('Please add at least one field', 'error'); return; }
+  // Allow either real fields OR a placeholder acre entry
+  const placeholderAcres = parseFloat(document.getElementById('fPlaceholderAcres')?.value || 0);
+  const hasPlaceholder   = document.getElementById('fUsePlaceholder')?.checked && placeholderAcres > 0;
+  if (orderFieldsSelected.length === 0 && !hasPlaceholder) {
+    showToast('Add at least one field or enter placeholder acres', 'error'); return;
+  }
+  // Build placeholder field entry if needed
+  if (hasPlaceholder && orderFieldsSelected.length === 0) {
+    const cust = DB.customers.find(c => c.CustomerID === custId);
+    const addr = cust ? [cust.Address, cust.City, cust.State].filter(Boolean).join(', ') : '';
+    orderFieldsSelected = [{
+      FieldID:   'PH-' + custId,
+      FieldName: document.getElementById('fPlaceholderName')?.value.trim() || 'Placeholder',
+      Acres:     placeholderAcres,
+      CentroidLat: cust?.MapCenterLat || '',
+      CentroidLng: cust?.MapCenterLng || '',
+      PolygonKML: '',
+      _placeholder: true,
+      _address: addr,
+    }];
+  }
 
   const totalAcres = orderFieldsSelected.reduce((s, f) => s + parseFloat(f.Acres || 0), 0);
   const ratePerAcre = parseFloat(document.getElementById('fRatePerAcre').value) || 0;

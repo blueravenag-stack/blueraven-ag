@@ -1,0 +1,10 @@
+{
+  "crops": ["Corn", "Soybeans", "Wheat", "Sorghum", "Cotton", "Other"],
+  "orderStatuses": ["Open", "Scheduled", "Completed"],
+  "pricingTypes": ["Flat Rate", "Flat Rate + Chemical"],
+  "suppliedByOptions": ["Me", "Customer"],
+  "defaultSprayRate": 2,
+  "defaultTankSize": 100,
+  "appName": "Blue Raven Ag",
+  "version": "4.2"
+}

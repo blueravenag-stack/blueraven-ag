@@ -819,14 +819,27 @@ window.MapModal = (() => {
       const newPoints  = newLatlngs.map(ll => ({ lat: ll.lat, lng: ll.lng }));
       poly._field.points = newPoints;
       // Recalculate acres from updated points
-      const newAcres = GeoUtils.calcAcres(newPoints).toFixed(1);
-      poly._field.acres = newAcres;
+      const editedAcres = GeoUtils.calcAcres(newPoints);
       // Re-style as selected
       poly.setStyle(fieldStyle(true));
-      // Update selectedFields entry
+      // Update selectedFields entry — replace first ring KML, preserve any extra rings
       const sf = selectedFields.find(s => s.id === id);
-      if (sf) { sf.points = newPoints; sf.acres = newAcres; }
-      setStatus('Polygon updated (' + newAcres + ' ac) — confirm to save changes');
+      if (sf) {
+        sf.points = newPoints;
+        const newRingKML = GeoUtils.pointsToKML(newPoints);
+        if (sf.kml && sf.kml.includes('<Polygon>') ) {
+          // Replace the first <Polygon>...</Polygon> block with the edited ring
+          sf.kml = sf.kml.replace(/<Polygon>[\s\S]*?<\/Polygon>/, newRingKML);
+          // Recalculate total acres across all rings in updated KML
+          const allRings = GeoUtils.parseKMLAllRings(sf.kml);
+          sf.acres = allRings.reduce((sum, r) => sum + GeoUtils.calcAcres(r), 0).toFixed(1);
+        } else {
+          sf.kml   = newRingKML;
+          sf.acres = editedAcres.toFixed(1);
+        }
+        poly._field.acres = sf.acres;
+      }
+      setStatus('Polygon updated (' + (sf?.acres || editedAcres.toFixed(1)) + ' ac) — confirm to save changes');
     } else {
       // Restore original
       poly.setLatLngs([_editingField.originalPoints.map(p => [p.lat, p.lng])]);

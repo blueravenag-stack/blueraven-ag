@@ -908,3 +908,16 @@ body.light .leaflet-container { background: #e8e8e8; }
 
 /* ── CUSTOMER MINI MAP ── */
 #cMiniMap .leaflet-container { background: var(--bg3); }
+
+/* ── SETTINGS VIEW ── */
+#view-settings .view-content { max-width: 600px; }
+#view-settings .detail-row { align-items: center; }
+#view-settings .detail-row input.form-input { padding: 0.3rem 0.5rem; height: auto; }
+#setCropList { width: 100%; resize: vertical; }
+
+/* ── PLACEHOLDER FIELDS ── */
+#placeholderFields { border: 1px dashed var(--border); }
+
+/* ── MIX BACK-CALC ── */
+#mixBackUnit { min-width: 50px; padding: 0.4rem 0.6rem; border-radius: var(--radius); }
+
