@@ -412,7 +412,13 @@ function viewOrder(orderId) {
   const fields = DB.orderFields.filter(f => f.OrderID === orderId);
   const fieldNames = fields.map(f => f.FieldName).join(', ') || '—';
   const estTotal = o.EstimatedTotal ? '$' + parseFloat(o.EstimatedTotal).toLocaleString('en-US',{minimumFractionDigits:2}) : '—';
-  const chemCost = o.ChemicalCost   ? '$' + parseFloat(o.ChemicalCost).toLocaleString('en-US',{minimumFractionDigits:2}) : '—';
+  const hasChemProds = DB.orderProds.filter(p => p.OrderID === o.OrderID && parseFloat(p.TotalProductCost||0) > 0).length > 0;
+  const chemTotal = parseFloat(o.ChemicalCost || 0);
+  const chemAcres = parseFloat(o.TotalAcres || 0);
+  const chemCostPerAc = (hasChemProds && chemAcres > 0) ? (chemTotal / chemAcres).toFixed(2) : null;
+  const chemCost = hasChemProds
+    ? '$' + chemTotal.toLocaleString('en-US',{minimumFractionDigits:2}) + (chemCostPerAc ? ' ($' + chemCostPerAc + '/ac)' : '')
+    : '—';
 
   let chemTable = '';
   if (prods.length) {
@@ -479,12 +485,20 @@ async function markComplete() {
   const o = DB.orders.find(x => x.OrderID === currentOrderId);
   if (!o) return;
   if (o.Status === 'Completed') { showToast('Order already completed', 'error'); return; }
+  const btn = document.getElementById('btnMarkComplete');
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
   o.Status = 'Completed';
   o.CompletedDate = new Date().toISOString().split('T')[0];
   saveToLocalStorage();
-  viewOrder(currentOrderId);          // re-render detail with updated status
-  showToast('Order marked complete', 'success');
-  await writeRow('orders', o);
+  try {
+    await writeRow('orders', o);
+    showToast('Order marked complete', 'success');
+  } catch(e) {
+    showToast('Save failed — try again', 'error');
+    o.Status = 'Scheduled'; o.CompletedDate = '';
+    saveToLocalStorage();
+  }
+  viewOrder(currentOrderId);
 }
 
 async function markInvoiced() {
@@ -1316,7 +1330,20 @@ async function onMapFieldsConfirmed(mapFields, custId, custName) {
   // ── Add preselected existing DB fields directly ───────────────────────────
   for (const mf of existingFields) {
     const dbField = DB.fields.find(f => f.FieldID === mf.id);
-    if (dbField && !orderFieldsSelected.find(f => f.FieldID === dbField.FieldID)) {
+    if (!dbField) continue;
+    // If the user edited the polygon, write updated acres + KML back to the field record
+    if (mf.points && mf.points.length >= 3) {
+      const updatedAcres = parseFloat(GeoUtils.calcAcres(mf.points).toFixed(1));
+      const currentAcres = parseFloat(dbField.Acres || 0);
+      if (Math.abs(updatedAcres - currentAcres) > 0.05) {
+        dbField.Acres      = updatedAcres.toFixed(1);
+        dbField.CentroidLat= mf.centroid ? mf.centroid.lat.toFixed(6) : dbField.CentroidLat;
+        dbField.CentroidLng= mf.centroid ? mf.centroid.lng.toFixed(6) : dbField.CentroidLng;
+        dbField.PolygonKML = mf.kml || dbField.PolygonKML;
+        await writeRow('fields', dbField);
+      }
+    }
+    if (!orderFieldsSelected.find(f => f.FieldID === dbField.FieldID)) {
       orderFieldsSelected.push(dbField);
       added++;
     }

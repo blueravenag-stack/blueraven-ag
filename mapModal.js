@@ -818,12 +818,15 @@ window.MapModal = (() => {
       const newLatlngs = _editMarkers.map(m => m.getLatLng());
       const newPoints  = newLatlngs.map(ll => ({ lat: ll.lat, lng: ll.lng }));
       poly._field.points = newPoints;
+      // Recalculate acres from updated points
+      const newAcres = GeoUtils.calcAcres(newPoints).toFixed(1);
+      poly._field.acres = newAcres;
       // Re-style as selected
       poly.setStyle(fieldStyle(true));
       // Update selectedFields entry
       const sf = selectedFields.find(s => s.id === id);
-      if (sf) sf.points = newPoints;
-      setStatus('Polygon updated — confirm to save changes');
+      if (sf) { sf.points = newPoints; sf.acres = newAcres; }
+      setStatus('Polygon updated (' + newAcres + ' ac) — confirm to save changes');
     } else {
       // Restore original
       poly.setLatLngs([_editingField.originalPoints.map(p => [p.lat, p.lng])]);
