@@ -921,3 +921,11 @@ body.light .leaflet-container { background: #e8e8e8; }
 /* ── MIX BACK-CALC ── */
 #mixBackUnit { min-width: 50px; padding: 0.4rem 0.6rem; border-radius: var(--radius); }
 
+/* ── REPORT PRINT BUTTONS ── */
+.report-filters { flex-wrap: wrap; }
+.report-filter-group { flex-shrink: 0; }
+@media (max-width: 600px) {
+  .report-filters > .report-filter-group:last-child { width: 100%; margin-top: 0.5rem; }
+  .report-filters > .report-filter-group:last-child .btn-secondary { flex: 1; justify-content: center; }
+}
+

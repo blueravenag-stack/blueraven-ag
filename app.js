@@ -1726,27 +1726,7 @@ function renderMixCalc() {
       tmplSel.appendChild(o);
     });
   }
-  // Populate back-calc dropdown for whichever template is currently selected
-  _populateMixBackCalcDropdown();
   runMixCalc();
-}
-
-function _populateMixBackCalcDropdown() {
-  const tmplId  = document.getElementById('mixCalcTemplate')?.value;
-  const backSel = document.getElementById('mixBackProduct');
-  if (!backSel) return;
-  if (!tmplId) {
-    backSel.innerHTML = '<option value="">— Select a template first —</option>';
-    return;
-  }
-  const prods = DB.templateProds.filter(p => p.TemplateID === tmplId);
-  backSel.innerHTML = '<option value="">— Pick product —</option>' +
-    prods.map(p => `<option value="${p.LineID}" data-rate="${p.RatePerAcre}" data-unit="${p.Unit}">${p.ProductName} (${p.RatePerAcre} ${p.Unit}/ac)</option>`).join('');
-  // Reset back-calc inputs when template changes
-  const amtEl  = document.getElementById('mixBackAmount');
-  const unitEl = document.getElementById('mixBackUnit');
-  if (amtEl)  amtEl.value = '';
-  if (unitEl) unitEl.textContent = '—';
 }
 
 // Track which mix calc input was last changed so they override each other
@@ -1787,7 +1767,14 @@ function onMixCalcTemplateChange() {
   const rateEl = document.getElementById('mixCalcSprayRateDisplay');
   if (rateEl) rateEl.textContent = rate + ' gal/ac';
   // Populate back-calc product dropdown
-  _populateMixBackCalcDropdown();
+  const backSel = document.getElementById('mixBackProduct');
+  if (backSel && tmplId) {
+    const prods = DB.templateProds.filter(p => p.TemplateID === tmplId);
+    backSel.innerHTML = '<option value="">— Pick product —</option>' +
+      prods.map(p => `<option value="${p.LineID}" data-rate="${p.RatePerAcre}" data-unit="${p.Unit}">${p.ProductName} (${p.RatePerAcre} ${p.Unit}/ac)</option>`).join('');
+    document.getElementById('mixBackAmount').value = '';
+    document.getElementById('mixBackUnit').textContent = '—';
+  }
   // Recalc from whichever was last changed
   if (mixCalcLastChanged === 'acres') onMixCalcAcresInput();
   else onMixCalcGalInput();
@@ -1918,6 +1905,420 @@ function saveSettingsUI() {
   if (crops.length) AppParams.crops = crops;
   saveSettings();
 }
+
+
+function _fmtCoord(lat, lng) {
+  const la = parseFloat(lat), lo = parseFloat(lng);
+  if (isNaN(la) || isNaN(lo)) return '—';
+  return la.toFixed(5) + ', ' + lo.toFixed(5);
+}
+
+// ── SHARED PRINT UTILITIES ───────────────────────────────────────────────────
+
+const _PRINT_CSS = `
+<link href='https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap' rel='stylesheet'>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'DM Sans', sans-serif; font-size: 13px; color: #1a2332; background: #fff; line-height: 1.5; }
+  .print-wrap { max-width: 900px; margin: 0 auto; padding: 24px; }
+  .print-header { display: flex; align-items: flex-start; justify-content: space-between; border-bottom: 2px solid #1a2332; padding-bottom: 14px; margin-bottom: 20px; }
+  .print-logo { font-size: 22px; font-weight: 700; color: #1a2332; letter-spacing: 0.04em; }
+  .print-logo span { color: #1a7fc4; }
+  .print-meta { text-align: right; font-size: 12px; color: #555; }
+  .print-meta strong { display: block; font-size: 15px; color: #1a2332; margin-bottom: 2px; }
+  .section { margin-bottom: 28px; }
+  .section-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #888; border-bottom: 1px solid #e0e0e0; padding-bottom: 5px; margin-bottom: 10px; }
+  .order-card { border: 1px solid #dde2ea; border-radius: 8px; margin-bottom: 16px; overflow: hidden; page-break-inside: avoid; }
+  .order-card-header { background: #f4f6f9; padding: 10px 14px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; }
+  .order-card-title { font-weight: 600; font-size: 14px; }
+  .order-card-sub { font-size: 12px; color: #555; }
+  .order-card-badge { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 99px; }
+  .badge-scheduled { background: #e3f2fd; color: #1565c0; }
+  .badge-completed { background: #e8f5e9; color: #2e7d32; }
+  .badge-open      { background: #fff8e1; color: #f57f17; }
+  .order-card-body { padding: 12px 14px; }
+  .field-row { display: flex; align-items: baseline; gap: 12px; padding: 6px 0; border-bottom: 1px solid #f0f0f0; }
+  .field-row:last-child { border-bottom: none; }
+  .field-name { font-weight: 500; flex: 1; }
+  .field-acres { font-family: 'DM Mono', monospace; font-size: 12px; color: #555; white-space: nowrap; }
+  .prod-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; }
+  .prod-table th { text-align: left; padding: 4px 8px; background: #f9fafb; font-weight: 500; color: #555; border-bottom: 1px solid #e8e8e8; }
+  .prod-table td { padding: 5px 8px; border-bottom: 1px solid #f4f4f4; }
+  .prod-table tr:last-child td { border-bottom: none; }
+  .by-customer { color: #2e7d32; font-weight: 500; }
+  .field-map { width: 100%; height: 200px; border-radius: 6px; border: 1px solid #dde2ea; margin-top: 10px; }
+  .summary-row { display: flex; gap: 24px; flex-wrap: wrap; padding: 10px 0; border-top: 1px solid #e0e0e0; margin-top: 4px; }
+  .summary-item .summary-val { font-size: 18px; font-weight: 700; color: #1a2332; }
+  .summary-item .summary-lbl { font-size: 11px; color: #888; }
+  .day-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .day-table th { text-align: left; padding: 6px 10px; background: #1a2332; color: #fff; font-weight: 500; font-size: 11px; letter-spacing: 0.04em; }
+  .day-table td { padding: 8px 10px; border-bottom: 1px solid #eee; vertical-align: top; }
+  .day-table tr:nth-child(even) td { background: #f9fafb; }
+  .num { font-family: 'DM Mono', monospace; }
+  .row-num { display: inline-block; width: 22px; height: 22px; border-radius: 50%; text-align: center; line-height: 22px; font-size: 11px; font-weight: 700; margin-right: 4px; }
+  .map-full { width: 100%; height: 420px; border-radius: 8px; border: 1px solid #dde2ea; margin-top: 12px; }
+  .no-print-btn { display: inline-block; margin: 0 8px 20px 0; padding: 8px 16px; background: #1a7fc4; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500; font-family: inherit; }
+  .no-print-btn.secondary { background: #fff; color: #1a2332; border: 1px solid #ccc; }
+  @media print {
+    .no-print-btn { display: none !important; }
+    body { font-size: 12px; }
+    .print-wrap { padding: 8px; max-width: 100%; }
+    .order-card { page-break-inside: avoid; }
+    .map-full { height: 360px; }
+    .field-map { height: 180px; }
+  }
+</style>`;
+
+const _LEAFLET_HEAD = `
+<link rel='stylesheet' href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'>
+<script src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'><\/script>`;
+
+const _PRINT_UTILS_JS = `
+function _fmtDate(s) {
+  if (!s || s === '—') return '—';
+  try {
+    var d = /^\\d{4}-\\d{2}-\\d{2}$/.test(s) ? new Date(s + 'T12:00:00') : new Date(s);
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  } catch(e) { return s; }
+}
+function _fmtAmt(amount, unit) {
+  var u = (unit || '').toLowerCase().trim();
+  var val;
+  if (['fl oz','fl. oz','floz','oz'].includes(u)) {
+    if (amount >= 128) { val = (amount/128).toFixed(2); u = 'gal'; }
+    else if (amount >= 32) { val = (amount/32).toFixed(2); u = 'qt'; }
+    else if (amount >= 16) { val = (amount/16).toFixed(2); u = 'pt'; }
+    else val = amount.toFixed(1);
+  } else if (u === 'lb' || u === 'lbs') {
+    val = amount >= 2000 ? (amount/2000).toFixed(2) + ' ton' : amount.toFixed(2);
+    if (amount >= 2000) return val;
+  } else {
+    val = amount % 1 === 0 ? String(amount) : amount.toFixed(2);
+  }
+  return val + ' ' + u;
+}
+function _fmtCoord(lat, lng) {
+  var la = parseFloat(lat), lo = parseFloat(lng);
+  if (isNaN(la) || isNaN(lo)) return '—';
+  return la.toFixed(5) + ', ' + lo.toFixed(5);
+}
+function _parseKML(kml) {
+  if (!kml) return [];
+  var rings = [], re = /<coordinates>([\\s\\S]*?)<\\/coordinates>/gi, m;
+  while ((m = re.exec(kml)) !== null) {
+    var pts = m[1].trim().split(/\\s+/).map(function(c){
+      var p = c.split(','); return p.length >= 2 ? { lat: parseFloat(p[1]), lng: parseFloat(p[0]) } : null;
+    }).filter(Boolean);
+    if (pts.length >= 3) rings.push(pts);
+  }
+  return rings;
+}
+function _addFieldToMap(map, field, color, label) {
+  var rings = _parseKML(field.kml);
+  var bounds = [];
+  rings.forEach(function(pts) {
+    var latlngs = pts.map(function(p){ return [p.lat, p.lng]; });
+    L.polygon(latlngs, { color: color, weight: 2, fillColor: color, fillOpacity: 0.25 }).addTo(map);
+    latlngs.forEach(function(ll){ bounds.push(ll); });
+  });
+  if (field.lat && field.lng && !isNaN(parseFloat(field.lat))) {
+    var ll = [parseFloat(field.lat), parseFloat(field.lng)];
+    if (label) L.marker(ll, { icon: L.divIcon({ className: '', iconSize: [22,22], iconAnchor: [11,11],
+      html: '<div style="width:22px;height:22px;background:' + color + ';color:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:11px;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.4)">' + label + '</div>' })
+    }).addTo(map);
+    else if (!rings.length) bounds.push(ll);
+  }
+  return bounds;
+}
+function _makeSatMap(container) {
+  var m = L.map(container, { zoomControl: true, scrollWheelZoom: false });
+  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19 }).addTo(m);
+  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, opacity: 0.7 }).addTo(m);
+  return m;
+}`;
+
+// ── CUSTOMER REPORT ───────────────────────────────────────────────────────────
+function printCustomerReport() {
+  const { from, to, label } = getReportDateRange();
+  const pilotFilter  = document.getElementById('reportPilot')?.value  || '';
+  const statusFilter = document.getElementById('reportStatus')?.value || '';
+
+  const filtered = DB.orders.filter(o => {
+    const d = o.ScheduledDate || o.OrderDate || '';
+    if (!d || d < from || d > to) return false;
+    if (pilotFilter  && o.PilotID  !== pilotFilter)  return false;
+    if (statusFilter && o.Status   !== statusFilter)  return false;
+    return true;
+  }).sort((a,b) => (a.ScheduledDate||a.OrderDate||'').localeCompare(b.ScheduledDate||b.OrderDate||''));
+
+  if (!filtered.length) { showToast('No orders in current filter to report', 'error'); return; }
+
+  // Group by customer
+  const custMap = {};
+  filtered.forEach(o => {
+    if (!custMap[o.CustomerID]) {
+      custMap[o.CustomerID] = {
+        cust: DB.customers.find(c => c.CustomerID === o.CustomerID),
+        name: o.CustomerName, orders: []
+      };
+    }
+    custMap[o.CustomerID].orders.push(o);
+  });
+
+  // Serialize all field/prod data needed in print window
+  const fieldIds = new Set();
+  filtered.forEach(o => DB.orderFields.filter(f=>f.OrderID===o.OrderID).forEach(f=>fieldIds.add(f.FieldID)));
+  const fieldsData = [...fieldIds].map(id => {
+    const f = DB.fields.find(x => x.FieldID === id);
+    return f ? { id: f.FieldID, name: f.FieldName, acres: f.Acres, kml: f.PolygonKML, lat: f.CentroidLat, lng: f.CentroidLng } : null;
+  }).filter(Boolean);
+
+  const ordersData = filtered.map(o => ({
+    id: o.OrderID, custId: o.CustomerID, custName: o.CustomerName,
+    date: o.ScheduledDate || o.OrderDate, status: o.Status, crop: o.CropType,
+    acres: o.TotalAcres, notes: o.Notes || '',
+    fields: DB.orderFields.filter(f=>f.OrderID===o.OrderID).map(f=>({ fid: f.FieldID, name: f.FieldName, acres: f.Acres })),
+    prods:  DB.orderProds.filter(p=>p.OrderID===o.OrderID).map(p=>({
+      name: p.ProductName, rate: p.RatePerAcre, unit: p.Unit,
+      total: p.TotalUnitsNeeded, by: p.SuppliedBy
+    }))
+  }));
+
+  const custsData = Object.values(custMap).map(g => ({
+    id: g.cust?.CustomerID || '', name: g.name,
+    addr: g.cust ? [g.cust.Address, g.cust.City, g.cust.State, g.cust.Zip].filter(Boolean).join(', ') : '',
+    phone: g.cust?.Phone || '', email: g.cust?.Email || '',
+    orderIds: g.orders.map(o => o.OrderID)
+  }));
+
+  const today = new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'});
+
+  const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Blue Raven Ag — Customer Report</title>
+${_PRINT_CSS}
+${_LEAFLET_HEAD}
+<script>
+${_PRINT_UTILS_JS}
+var ORDERS  = ${JSON.stringify(ordersData)};
+var FIELDS  = ${JSON.stringify(fieldsData)};
+var CUSTS   = ${JSON.stringify(custsData)};
+var COLORS  = ['#4FC3F7','#81C784','#FFB74D','#F48FB1','#CE93D8','#80DEEA','#FFCC02','#a5d6a7'];
+
+window.addEventListener('load', function() {
+  // Render one map per order card
+  ORDERS.forEach(function(o, idx) {
+    var container = document.getElementById('omap_' + o.id);
+    if (!container) return;
+    var flds = o.fields.map(function(f){ return FIELDS.find(function(x){ return x.id === f.fid; }); }).filter(Boolean);
+    if (!flds.length) { container.style.display = 'none'; return; }
+    setTimeout(function() {
+      var m = _makeSatMap(container);
+      var bounds = [];
+      flds.forEach(function(f) {
+        var b = _addFieldToMap(m, f, '#4FC3F7', null);
+        bounds = bounds.concat(b);
+      });
+      if (bounds.length) m.fitBounds(bounds, { padding: [16,16], maxZoom: 16 });
+    }, 200 + idx * 120);
+  });
+});
+<\/script>
+</head><body>
+<div class="print-wrap">
+  <div style="margin-bottom:16px">
+    <button class="no-print-btn" onclick="window.print()">🖨 Print / Save PDF</button>
+    <button class="no-print-btn secondary" onclick="window.close()">Close</button>
+  </div>
+  <div class="print-header">
+    <div class="print-logo">BLUE <span>RAVEN</span> AG</div>
+    <div class="print-meta"><strong>Customer Spray Report</strong>Generated ${today} · ${label}</div>
+  </div>
+  <div id="reportBody"></div>
+</div>
+<script>
+(function() {
+  var body = document.getElementById('reportBody');
+  CUSTS.forEach(function(c, ci) {
+    var orders = ORDERS.filter(function(o){ return c.orderIds.indexOf(o.id) > -1; });
+    var totalAc = orders.reduce(function(s,o){ return s + parseFloat(o.acres||0); }, 0);
+    var custHtml = '<div style="' + (ci > 0 ? 'page-break-before:always;' : '') + 'margin-bottom:32px">';
+    custHtml += '<div class="section"><div class="section-title">Customer</div>';
+    custHtml += '<div style="font-size:18px;font-weight:700;margin-bottom:2px">' + c.name + '</div>';
+    if (c.addr)  custHtml += '<div style="color:#555;font-size:13px">' + c.addr  + '</div>';
+    if (c.phone) custHtml += '<div style="color:#555;font-size:13px">' + c.phone + '</div>';
+    custHtml += '</div>';
+    custHtml += '<div class="section"><div class="section-title">Orders</div>';
+    orders.forEach(function(o) {
+      var badge = o.status === 'Completed' ? 'completed' : o.status === 'Scheduled' ? 'scheduled' : 'open';
+      custHtml += '<div class="order-card">';
+      custHtml += '<div class="order-card-header">';
+      custHtml += '<div><div class="order-card-title">' + (o.fields.map(function(f){return f.name;}).join(', ') || o.id) + '</div>';
+      custHtml += '<div class="order-card-sub">' + _fmtDate(o.date) + ' · ' + parseFloat(o.acres||0).toFixed(1) + ' ac · ' + (o.crop||'—') + '</div></div>';
+      custHtml += '<span class="order-card-badge badge-' + badge + '">' + o.status + '</span>';
+      custHtml += '</div><div class="order-card-body">';
+      o.fields.forEach(function(f) {
+        custHtml += '<div class="field-row"><span class="field-name">' + f.name + '</span><span class="field-acres">' + parseFloat(f.acres||0).toFixed(1) + ' ac</span><span class="field-acres">' + (o.crop||'') + '</span></div>';
+      });
+      if (o.prods.length) {
+        custHtml += '<table class="prod-table" style="margin-top:10px"><thead><tr><th>Product</th><th>Rate</th><th>Total Needed</th><th>Supplied By</th></tr></thead><tbody>';
+        o.prods.forEach(function(p) {
+          custHtml += '<tr><td>' + p.name + '</td><td>' + p.rate + ' ' + p.unit + '/ac</td>';
+          custHtml += '<td>' + _fmtAmt(parseFloat(p.total||0), p.unit) + '</td>';
+          custHtml += '<td class="' + (p.by === 'Customer' ? 'by-customer' : '') + '">' + (p.by === 'Customer' ? 'Customer' : 'Applicator') + '</td></tr>';
+        });
+        custHtml += '</tbody></table>';
+      }
+      custHtml += '<div id="omap_' + o.id + '" class="field-map"></div>';
+      if (o.notes) custHtml += '<div style="margin-top:8px;font-size:12px;color:#555">Notes: ' + o.notes + '</div>';
+      custHtml += '</div></div>';
+    });
+    custHtml += '</div>';
+    custHtml += '<div class="summary-row"><div class="summary-item"><div class="summary-val">' + orders.length + '</div><div class="summary-lbl">Orders</div></div>';
+    custHtml += '<div class="summary-item"><div class="summary-val">' + totalAc.toFixed(1) + '</div><div class="summary-lbl">Total Acres</div></div></div>';
+    custHtml += '</div>';
+    body.insertAdjacentHTML('beforeend', custHtml);
+  });
+})();
+<\/script>
+</body></html>`;
+
+  const win = window.open('', '_blank');
+  if (!win) { showToast('Pop-up blocked — please allow pop-ups for this site', 'error'); return; }
+  win.document.write(html);
+  win.document.close();
+}
+
+// ── PILOT DAY SHEET ───────────────────────────────────────────────────────────
+function printPilotSheet() {
+  const { from, to, label } = getReportDateRange();
+  const pilotFilter  = document.getElementById('reportPilot')?.value  || '';
+  const statusFilter = document.getElementById('reportStatus')?.value || '';
+
+  const filtered = DB.orders.filter(o => {
+    const d = o.ScheduledDate || o.OrderDate || '';
+    if (!d || d < from || d > to) return false;
+    if (pilotFilter  && o.PilotID  !== pilotFilter)  return false;
+    if (statusFilter && o.Status   !== statusFilter)  return false;
+    return true;
+  }).sort((a,b) => (a.ScheduledDate||a.OrderDate||'').localeCompare(b.ScheduledDate||b.OrderDate||''));
+
+  if (!filtered.length) { showToast('No orders in current filter for day sheet', 'error'); return; }
+
+  const pilotName = pilotFilter
+    ? (DB.pilots.find(p => p.PilotID === pilotFilter)?.Name || 'All Pilots')
+    : 'All Pilots';
+
+  let totalAcres = 0;
+  const rowsData = filtered.map((o, idx) => {
+    const oFields  = DB.orderFields.filter(f => f.OrderID === o.OrderID);
+    const oProds   = DB.orderProds.filter(p => p.OrderID === o.OrderID);
+    const tmpl     = DB.templates.find(t => t.TemplateID === o.TemplateUsed);
+    const ac       = parseFloat(o.TotalAcres || 0);
+    totalAcres    += ac;
+    const fieldDbRows = oFields.map(f => DB.fields.find(x => x.FieldID === f.FieldID)).filter(Boolean);
+    return {
+      num: idx + 1,
+      custName: o.CustomerName,
+      fieldNames: oFields.map(f => f.FieldName).join(', ') || '—',
+      crop: o.CropType || '—',
+      acres: ac,
+      mix: tmpl ? tmpl.TemplateName : (oProds.length ? 'Custom mix' : 'None'),
+      prods: oProds.map(p => p.ProductName + ' @ ' + p.RatePerAcre + ' ' + p.Unit + '/ac').join(' | '),
+      coords: fieldDbRows.map(f => _fmtCoord(f.CentroidLat, f.CentroidLng)).join(' / '),
+      notes: o.Notes || '',
+      mapFields: fieldDbRows.map(f => ({ name: f.FieldName, kml: f.PolygonKML, lat: f.CentroidLat, lng: f.CentroidLng }))
+    };
+  });
+
+  const today    = new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'});
+  const COLORS   = ['#4FC3F7','#81C784','#FFB74D','#F48FB1','#CE93D8','#80DEEA','#FFCC02','#a5d6a7'];
+
+  const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Blue Raven Ag — Pilot Day Sheet</title>
+${_PRINT_CSS}
+${_LEAFLET_HEAD}
+<script>
+${_PRINT_UTILS_JS}
+var ROWS   = ${JSON.stringify(rowsData)};
+var COLORS = ${JSON.stringify(COLORS)};
+window.addEventListener('load', function() {
+  var container = document.getElementById('pilotDayMap');
+  if (!container) return;
+  var m = _makeSatMap(container);
+  var bounds = [];
+  ROWS.forEach(function(r) {
+    var color = COLORS[(r.num - 1) % COLORS.length];
+    r.mapFields.forEach(function(f) {
+      var b = _addFieldToMap(m, f, color, r.num);
+      bounds = bounds.concat(b);
+    });
+  });
+  if (bounds.length) m.fitBounds(bounds, { padding: [30, 30] });
+});
+<\/script>
+</head><body>
+<div class="print-wrap">
+  <div style="margin-bottom:16px">
+    <button class="no-print-btn" onclick="window.print()">🖨 Print / Save PDF</button>
+    <button class="no-print-btn secondary" onclick="window.close()">Close</button>
+  </div>
+  <div class="print-header">
+    <div class="print-logo">BLUE <span>RAVEN</span> AG</div>
+    <div class="print-meta"><strong>Pilot Day Sheet</strong>${today}</div>
+  </div>
+  <div class="section">
+    <div class="section-title">Summary</div>
+    <div style="display:flex;gap:28px;flex-wrap:wrap">
+      <div><div style="color:#888;font-size:12px">Pilot</div><div style="font-size:15px;font-weight:700">${pilotName}</div></div>
+      <div><div style="color:#888;font-size:12px">Period</div><div style="font-size:15px;font-weight:700">${label}</div></div>
+      <div><div style="color:#888;font-size:12px">Orders</div><div style="font-size:15px;font-weight:700">${filtered.length}</div></div>
+      <div><div style="color:#888;font-size:12px">Total Acres</div><div style="font-size:15px;font-weight:700">${totalAcres.toFixed(1)}</div></div>
+    </div>
+  </div>
+  <div class="section">
+    <div class="section-title">Field Schedule</div>
+    <div style="overflow-x:auto">
+      <table class="day-table">
+        <thead><tr><th>#</th><th>Customer</th><th>Fields / Notes</th><th>Crop</th><th>Acres</th><th>Mix Template</th><th>Products</th><th>GPS Coords</th></tr></thead>
+        <tbody id="dayTableBody"></tbody>
+      </table>
+    </div>
+  </div>
+  <div class="section">
+    <div class="section-title">Field Map — numbered markers match schedule above</div>
+    <div id="pilotDayMap" class="map-full"></div>
+  </div>
+</div>
+<script>
+(function() {
+  var tbody = document.getElementById('dayTableBody');
+  ROWS.forEach(function(r) {
+    var color = COLORS[(r.num - 1) % COLORS.length];
+    var tr = document.createElement('tr');
+    tr.innerHTML =
+      '<td><span class="row-num" style="background:' + color + '">' + r.num + '</span></td>' +
+      '<td>' + r.custName + '</td>' +
+      '<td><strong>' + r.fieldNames + '</strong>' + (r.notes ? '<br><span style="color:#888;font-size:11px">' + r.notes + '</span>' : '') + '</td>' +
+      '<td>' + r.crop + '</td>' +
+      '<td class="num">' + r.acres.toFixed(1) + '</td>' +
+      '<td style="font-size:11px">' + r.mix + '</td>' +
+      '<td style="font-size:11px">' + (r.prods || '—') + '</td>' +
+      '<td class="num" style="font-size:11px">' + (r.coords || '—') + '</td>';
+    tbody.appendChild(tr);
+  });
+})();
+<\/script>
+</body></html>`;
+
+  const win = window.open('', '_blank');
+  if (!win) { showToast('Pop-up blocked — please allow pop-ups for this site', 'error'); return; }
+  win.document.write(html);
+  win.document.close();
+}
+
+
 
 // ── GDU FUNGICIDE PREDICTOR ──────────────────────────────────────────────────
 let gduResults  = [];   // cached results per session
