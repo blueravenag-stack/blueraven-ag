@@ -1726,7 +1726,27 @@ function renderMixCalc() {
       tmplSel.appendChild(o);
     });
   }
+  // Populate back-calc dropdown for whichever template is currently selected
+  _populateMixBackCalcDropdown();
   runMixCalc();
+}
+
+function _populateMixBackCalcDropdown() {
+  const tmplId  = document.getElementById('mixCalcTemplate')?.value;
+  const backSel = document.getElementById('mixBackProduct');
+  if (!backSel) return;
+  if (!tmplId) {
+    backSel.innerHTML = '<option value="">— Select a template first —</option>';
+    return;
+  }
+  const prods = DB.templateProds.filter(p => p.TemplateID === tmplId);
+  backSel.innerHTML = '<option value="">— Pick product —</option>' +
+    prods.map(p => `<option value="${p.LineID}" data-rate="${p.RatePerAcre}" data-unit="${p.Unit}">${p.ProductName} (${p.RatePerAcre} ${p.Unit}/ac)</option>`).join('');
+  // Reset back-calc inputs when template changes
+  const amtEl  = document.getElementById('mixBackAmount');
+  const unitEl = document.getElementById('mixBackUnit');
+  if (amtEl)  amtEl.value = '';
+  if (unitEl) unitEl.textContent = '—';
 }
 
 // Track which mix calc input was last changed so they override each other
@@ -1767,14 +1787,7 @@ function onMixCalcTemplateChange() {
   const rateEl = document.getElementById('mixCalcSprayRateDisplay');
   if (rateEl) rateEl.textContent = rate + ' gal/ac';
   // Populate back-calc product dropdown
-  const backSel = document.getElementById('mixBackProduct');
-  if (backSel && tmplId) {
-    const prods = DB.templateProds.filter(p => p.TemplateID === tmplId);
-    backSel.innerHTML = '<option value="">— Pick product —</option>' +
-      prods.map(p => `<option value="${p.LineID}" data-rate="${p.RatePerAcre}" data-unit="${p.Unit}">${p.ProductName} (${p.RatePerAcre} ${p.Unit}/ac)</option>`).join('');
-    document.getElementById('mixBackAmount').value = '';
-    document.getElementById('mixBackUnit').textContent = '—';
-  }
+  _populateMixBackCalcDropdown();
   // Recalc from whichever was last changed
   if (mixCalcLastChanged === 'acres') onMixCalcAcresInput();
   else onMixCalcGalInput();
