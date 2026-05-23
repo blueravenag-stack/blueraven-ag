@@ -97,6 +97,16 @@ window.GeoUtils = (() => {
 
   // ── ACRES CALCULATION (Shoelace + spherical correction) ────────────────────
 
+  // Haversine distance between two {lat,lng} points, returns km
+  function haversineKm(a, b) {
+    const R    = 6371;
+    const dLat = (b.lat - a.lat) * Math.PI / 180;
+    const dLng = (b.lng - a.lng) * Math.PI / 180;
+    const sinL = Math.sin(dLat / 2), sinG = Math.sin(dLng / 2);
+    const c    = sinL * sinL + Math.cos(a.lat * Math.PI / 180) * Math.cos(b.lat * Math.PI / 180) * sinG * sinG;
+    return R * 2 * Math.atan2(Math.sqrt(c), Math.sqrt(1 - c));
+  }
+
   function calcAcres(points) {
     // Spherical lune formula — accurate to <1% for typical field sizes
     // Validated: 160-acre quarter section returns 160.8 ac at 39°N
@@ -420,6 +430,7 @@ window.GeoUtils = (() => {
   return {
     parsePolygon,
     parseKMLAllRings,
+    haversineKm,
     calcAcres,
     centroid,
     pointsToKML,

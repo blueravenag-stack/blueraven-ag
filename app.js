@@ -53,8 +53,13 @@ async function loadParams() {
 }
 
 let AppSettings = {
-  defaultSprayRate: 2,   // gal/ac — used when template has no spray rate
-  defaultTankSize:  100, // gallons
+  defaultSprayRate: 2,      // gal/ac
+  defaultTankSize:  100,    // gallons
+  homeBaseLat:      null,   // scheduling home base
+  homeBaseLng:      null,
+  homeBaseLabel:    '',
+  pilotTargets:     {},     // { PilotID: acresPerDay }
+  defaultDailyAcres: 200,   // fallback if pilot has no target set
 };
 
 function loadSettings() {
@@ -155,6 +160,7 @@ function renderView(view) {
     case 'reports':    renderReports(); break;
     case 'gdu':        renderGDU(); break;
     case 'settings':   renderSettings(); break;
+    case 'schedule':   renderSchedule(); break;
   }
 }
 
@@ -1888,12 +1894,48 @@ function renderSettings() {
       <textarea class="form-input" id="setCropList" rows="8" style="font-family:var(--font-mono);font-size:0.82rem" oninput="saveSettingsUI()">${AppParams.crops.join('\n')}</textarea>
       <div style="font-size:0.75rem;color:var(--text-sub);margin-top:0.4rem">Changes take effect immediately. To make permanent, update <code>params.json</code> in GitHub.</div>
     </div>
+    <div class="detail-card" style="margin-bottom:1rem">
+      <div class="detail-section-title">Scheduling — Home Base</div>
+      <div class="detail-row">
+        <span>Address / label</span>
+        <input class="form-input" type="text" style="width:180px;text-align:right"
+          id="setHomeLabel" value="${AppSettings.homeBaseLabel || ''}" placeholder="e.g. Shop" oninput="saveSettingsUI()">
+      </div>
+      <div class="detail-row">
+        <span>Latitude</span>
+        <input class="form-input" type="number" step="0.00001" style="width:130px;text-align:right"
+          id="setHomeLat" value="${AppSettings.homeBaseLat || ''}" placeholder="e.g. 40.12345" oninput="saveSettingsUI()">
+      </div>
+      <div class="detail-row">
+        <span>Longitude</span>
+        <input class="form-input" type="number" step="0.00001" style="width:130px;text-align:right"
+          id="setHomeLng" value="${AppSettings.homeBaseLng || ''}" placeholder="e.g. -88.54321" oninput="saveSettingsUI()">
+      </div>
+      <div style="font-size:0.75rem;color:var(--text-sub);margin-top:0.4rem">Used as the starting point for auto-route calculations.</div>
+    </div>
+    <div class="detail-card" style="margin-bottom:1rem">
+      <div class="detail-section-title">Scheduling — Pilot Daily Acre Targets</div>
+      <div class="detail-row">
+        <span>Default (unassigned)</span>
+        <input class="form-input" type="number" step="1" style="width:90px;text-align:right"
+          id="setDefaultAcres" value="${AppSettings.defaultDailyAcres || 200}" oninput="saveSettingsUI()">
+      </div>
+      <div id="pilotTargetRows">
+        ${DB.pilots.filter(p => p.Active === 'Yes').map(p => `
+        <div class="detail-row">
+          <span>${p.Name}</span>
+          <input class="form-input" type="number" step="1" style="width:90px;text-align:right"
+            id="setPT_${p.PilotID}" value="${AppSettings.pilotTargets?.[p.PilotID] || AppSettings.defaultDailyAcres || 200}"
+            oninput="saveSettingsUI()">
+        </div>`).join('')}
+      </div>
+    </div>
     <div class="detail-card">
       <div class="detail-section-title">About</div>
       <div class="detail-row"><span>Version</span><span>${AppParams.version || '—'}</span></div>
       <div class="detail-row"><span>Sheet ID</span><span style="font-family:var(--font-mono);font-size:0.75rem">${SHEET_ID}</span></div>
     </div>
-  `;
+  \`;
 }
 
 function saveSettingsUI() {
@@ -1903,6 +1945,21 @@ function saveSettingsUI() {
   if (!isNaN(rate)) AppSettings.defaultSprayRate = rate;
   if (!isNaN(tank)) AppSettings.defaultTankSize  = tank;
   if (crops.length) AppParams.crops = crops;
+  // Scheduling settings
+  const homeLat   = parseFloat(document.getElementById('setHomeLat')?.value);
+  const homeLng   = parseFloat(document.getElementById('setHomeLng')?.value);
+  const homeLabel = document.getElementById('setHomeLabel')?.value.trim() || '';
+  const defAcres  = parseFloat(document.getElementById('setDefaultAcres')?.value);
+  if (!isNaN(homeLat)) AppSettings.homeBaseLat   = homeLat;
+  if (!isNaN(homeLng)) AppSettings.homeBaseLng   = homeLng;
+  AppSettings.homeBaseLabel    = homeLabel;
+  if (!isNaN(defAcres)) AppSettings.defaultDailyAcres = defAcres;
+  // Per-pilot targets
+  if (!AppSettings.pilotTargets) AppSettings.pilotTargets = {};
+  DB.pilots.filter(p => p.Active === 'Yes').forEach(p => {
+    const v = parseFloat(document.getElementById('setPT_' + p.PilotID)?.value);
+    if (!isNaN(v)) AppSettings.pilotTargets[p.PilotID] = v;
+  });
   saveSettings();
 }
 
@@ -2043,11 +2100,14 @@ function printCustomerReport() {
   const pilotFilter  = document.getElementById('reportPilot')?.value  || '';
   const statusFilter = document.getElementById('reportStatus')?.value || '';
 
+  const customerFilter = document.getElementById('reportCustomer')?.value || '';
+
   const filtered = DB.orders.filter(o => {
     const d = o.ScheduledDate || o.OrderDate || '';
     if (!d || d < from || d > to) return false;
-    if (pilotFilter  && o.PilotID  !== pilotFilter)  return false;
-    if (statusFilter && o.Status   !== statusFilter)  return false;
+    if (customerFilter && o.CustomerID !== customerFilter) return false;
+    if (pilotFilter    && o.PilotID    !== pilotFilter)    return false;
+    if (statusFilter   && o.Status     !== statusFilter)   return false;
     return true;
   }).sort((a,b) => (a.ScheduledDate||a.OrderDate||'').localeCompare(b.ScheduledDate||b.OrderDate||''));
 
@@ -2192,47 +2252,74 @@ window.addEventListener('load', function() {
 // ── PILOT DAY SHEET ───────────────────────────────────────────────────────────
 function printPilotSheet() {
   const { from, to, label } = getReportDateRange();
-  const pilotFilter  = document.getElementById('reportPilot')?.value  || '';
-  const statusFilter = document.getElementById('reportStatus')?.value || '';
+  const pilotFilter    = document.getElementById('reportPilot')?.value    || '';
+  const statusFilter   = document.getElementById('reportStatus')?.value   || '';
+  const customerFilter = document.getElementById('reportCustomer')?.value || '';
 
   const filtered = DB.orders.filter(o => {
     const d = o.ScheduledDate || o.OrderDate || '';
     if (!d || d < from || d > to) return false;
-    if (pilotFilter  && o.PilotID  !== pilotFilter)  return false;
-    if (statusFilter && o.Status   !== statusFilter)  return false;
+    if (customerFilter && o.CustomerID !== customerFilter) return false;
+    if (pilotFilter    && o.PilotID    !== pilotFilter)    return false;
+    if (statusFilter   && o.Status     !== statusFilter)   return false;
     return true;
-  }).sort((a,b) => (a.ScheduledDate||a.OrderDate||'').localeCompare(b.ScheduledDate||b.OrderDate||''));
+  }).sort((a,b) => {
+    // Sort by pilot, then date
+    const pa = a.PilotName || '', pb = b.PilotName || '';
+    if (pa !== pb) return pa.localeCompare(pb);
+    return (a.ScheduledDate||a.OrderDate||'').localeCompare(b.ScheduledDate||b.OrderDate||'');
+  });
 
   if (!filtered.length) { showToast('No orders in current filter for day sheet', 'error'); return; }
 
-  const pilotName = pilotFilter
-    ? (DB.pilots.find(p => p.PilotID === pilotFilter)?.Name || 'All Pilots')
-    : 'All Pilots';
-
-  let totalAcres = 0;
-  const rowsData = filtered.map((o, idx) => {
-    const oFields  = DB.orderFields.filter(f => f.OrderID === o.OrderID);
-    const oProds   = DB.orderProds.filter(p => p.OrderID === o.OrderID);
-    const tmpl     = DB.templates.find(t => t.TemplateID === o.TemplateUsed);
-    const ac       = parseFloat(o.TotalAcres || 0);
-    totalAcres    += ac;
-    const fieldDbRows = oFields.map(f => DB.fields.find(x => x.FieldID === f.FieldID)).filter(Boolean);
-    return {
-      num: idx + 1,
-      custName: o.CustomerName,
-      fieldNames: oFields.map(f => f.FieldName).join(', ') || '—',
-      crop: o.CropType || '—',
-      acres: ac,
-      mix: tmpl ? tmpl.TemplateName : (oProds.length ? 'Custom mix' : 'None'),
-      prods: oProds.map(p => p.ProductName + ' @ ' + p.RatePerAcre + ' ' + p.Unit + '/ac').join(' | '),
-      coords: fieldDbRows.map(f => _fmtCoord(f.CentroidLat, f.CentroidLng)).join(' / '),
-      notes: o.Notes || '',
-      mapFields: fieldDbRows.map(f => ({ name: f.FieldName, kml: f.PolygonKML, lat: f.CentroidLat, lng: f.CentroidLng }))
-    };
+  // Group: pilot → date → [orders]
+  const pilotDayMap = {};
+  filtered.forEach(o => {
+    const pid  = o.PilotID || 'unassigned';
+    const date = o.ScheduledDate || o.OrderDate || 'Unknown Date';
+    if (!pilotDayMap[pid]) pilotDayMap[pid] = {};
+    if (!pilotDayMap[pid][date]) pilotDayMap[pid][date] = [];
+    pilotDayMap[pid][date].push(o);
   });
 
-  const today    = new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'});
-  const COLORS   = ['#4FC3F7','#81C784','#FFB74D','#F48FB1','#CE93D8','#80DEEA','#FFCC02','#a5d6a7'];
+  // Build rowsData per pilot-day block
+  // Each block: { pilotId, pilotName, pilotPhone, pilotCert, date, rows[], totalAcres }
+  const blocks = [];
+  Object.keys(pilotDayMap).forEach(pid => {
+    const pilotRec  = DB.pilots.find(p => p.PilotID === pid);
+    const pilotName = pilotRec?.Name  || filtered.find(o=>o.PilotID===pid)?.PilotName || 'Unassigned';
+    const pilotPhone= pilotRec?.Phone || '';
+    const pilotCert = pilotRec?.FAA_Part107_Num || '';
+
+    Object.keys(pilotDayMap[pid]).sort().forEach(date => {
+      const dayOrders = pilotDayMap[pid][date];
+      let totalAcres  = 0;
+      const rows = dayOrders.map((o, idx) => {
+        const oFields  = DB.orderFields.filter(f => f.OrderID === o.OrderID);
+        const oProds   = DB.orderProds.filter(p => p.OrderID === o.OrderID);
+        const tmpl     = DB.templates.find(t => t.TemplateID === o.TemplateUsed);
+        const ac       = parseFloat(o.TotalAcres || 0);
+        totalAcres    += ac;
+        const fieldDbRows = oFields.map(f => DB.fields.find(x => x.FieldID === f.FieldID)).filter(Boolean);
+        return {
+          num:        idx + 1,
+          custName:   o.CustomerName,
+          fieldNames: oFields.map(f => f.FieldName).join(', ') || '—',
+          crop:       o.CropType || '—',
+          acres:      ac,
+          mix:        tmpl ? tmpl.TemplateName : (oProds.length ? 'Custom mix' : 'None'),
+          prods:      oProds.map(p => p.ProductName + ' @ ' + p.RatePerAcre + ' ' + p.Unit + '/ac').join(' | '),
+          coords:     fieldDbRows.map(f => _fmtCoord(f.CentroidLat, f.CentroidLng)).join(' / '),
+          notes:      o.Notes || '',
+          mapFields:  fieldDbRows.map(f => ({ name: f.FieldName, kml: f.PolygonKML, lat: f.CentroidLat, lng: f.CentroidLng }))
+        };
+      });
+      blocks.push({ pilotId: pid, pilotName, pilotPhone, pilotCert, date, rows, totalAcres });
+    });
+  });
+
+  const today  = new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'});
+  const COLORS = ['#4FC3F7','#81C784','#FFB74D','#F48FB1','#CE93D8','#80DEEA','#FFCC02','#a5d6a7'];
 
   const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -2241,72 +2328,80 @@ ${_PRINT_CSS}
 ${_LEAFLET_HEAD}
 <script>
 ${_PRINT_UTILS_JS}
-var ROWS   = ${JSON.stringify(rowsData)};
+var BLOCKS = ${JSON.stringify(blocks)};
 var COLORS = ${JSON.stringify(COLORS)};
 window.addEventListener('load', function() {
-  var container = document.getElementById('pilotDayMap');
-  if (!container) return;
-  var m = _makeSatMap(container);
-  var bounds = [];
-  ROWS.forEach(function(r) {
-    var color = COLORS[(r.num - 1) % COLORS.length];
-    r.mapFields.forEach(function(f) {
-      var b = _addFieldToMap(m, f, color, r.num);
-      bounds = bounds.concat(b);
+  BLOCKS.forEach(function(block, bi) {
+    var container = document.getElementById('daymap_' + bi);
+    if (!container) return;
+    var m = _makeSatMap(container);
+    var bounds = [];
+    block.rows.forEach(function(r) {
+      var color = COLORS[(r.num - 1) % COLORS.length];
+      r.mapFields.forEach(function(f) {
+        var b = _addFieldToMap(m, f, color, r.num);
+        bounds = bounds.concat(b);
+      });
     });
+    if (bounds.length) m.fitBounds(bounds, { padding: [30, 30] });
   });
-  if (bounds.length) m.fitBounds(bounds, { padding: [30, 30] });
 });
 <\/script>
 </head><body>
-<div class="print-wrap">
-  <div style="margin-bottom:16px">
-    <button class="no-print-btn" onclick="window.print()">🖨 Print / Save PDF</button>
-    <button class="no-print-btn secondary" onclick="window.close()">Close</button>
-  </div>
-  <div class="print-header">
-    <div class="print-logo">BLUE <span>RAVEN</span> AG</div>
-    <div class="print-meta"><strong>Pilot Day Sheet</strong>${today}</div>
-  </div>
-  <div class="section">
-    <div class="section-title">Summary</div>
-    <div style="display:flex;gap:28px;flex-wrap:wrap">
-      <div><div style="color:#888;font-size:12px">Pilot</div><div style="font-size:15px;font-weight:700">${pilotName}</div></div>
-      <div><div style="color:#888;font-size:12px">Period</div><div style="font-size:15px;font-weight:700">${label}</div></div>
-      <div><div style="color:#888;font-size:12px">Orders</div><div style="font-size:15px;font-weight:700">${filtered.length}</div></div>
-      <div><div style="color:#888;font-size:12px">Total Acres</div><div style="font-size:15px;font-weight:700">${totalAcres.toFixed(1)}</div></div>
-    </div>
-  </div>
-  <div class="section">
-    <div class="section-title">Field Schedule</div>
-    <div style="overflow-x:auto">
-      <table class="day-table">
-        <thead><tr><th>#</th><th>Customer</th><th>Fields / Notes</th><th>Crop</th><th>Acres</th><th>Mix Template</th><th>Products</th><th>GPS Coords</th></tr></thead>
-        <tbody id="dayTableBody"></tbody>
-      </table>
-    </div>
-  </div>
-  <div class="section">
-    <div class="section-title">Field Map — numbered markers match schedule above</div>
-    <div id="pilotDayMap" class="map-full"></div>
-  </div>
+<div style="margin:16px">
+  <button class="no-print-btn" onclick="window.print()">🖨 Print / Save PDF</button>
+  <button class="no-print-btn secondary" onclick="window.close()">Close</button>
 </div>
+<div id="sheetBody"></div>
 <script>
 (function() {
-  var tbody = document.getElementById('dayTableBody');
-  ROWS.forEach(function(r) {
-    var color = COLORS[(r.num - 1) % COLORS.length];
-    var tr = document.createElement('tr');
-    tr.innerHTML =
-      '<td><span class="row-num" style="background:' + color + '">' + r.num + '</span></td>' +
-      '<td>' + r.custName + '</td>' +
-      '<td><strong>' + r.fieldNames + '</strong>' + (r.notes ? '<br><span style="color:#888;font-size:11px">' + r.notes + '</span>' : '') + '</td>' +
-      '<td>' + r.crop + '</td>' +
-      '<td class="num">' + r.acres.toFixed(1) + '</td>' +
-      '<td style="font-size:11px">' + r.mix + '</td>' +
-      '<td style="font-size:11px">' + (r.prods || '—') + '</td>' +
-      '<td class="num" style="font-size:11px">' + (r.coords || '—') + '</td>';
-    tbody.appendChild(tr);
+  var body = document.getElementById('sheetBody');
+  BLOCKS.forEach(function(block, bi) {
+    var fmtDate = function(s) {
+      if (!s || s === 'Unknown Date') return s;
+      try {
+        var d = /^\\d{4}-\\d{2}-\\d{2}$/.test(s) ? new Date(s + 'T12:00:00') : new Date(s);
+        return d.toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' });
+      } catch(e) { return s; }
+    };
+    var isFirstBlock = bi === 0;
+    var html = '<div class="print-wrap" style="' + (isFirstBlock ? '' : 'page-break-before:always') + '">';
+    // Header
+    html += '<div class="print-header"><div class="print-logo">BLUE <span>RAVEN</span> AG</div>';
+    html += '<div class="print-meta"><strong>Pilot Day Sheet</strong>' + new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'}) + '</div></div>';
+    // Pilot + date summary
+    html += '<div class="section"><div class="section-title">Pilot &amp; Date</div>';
+    html += '<div style="display:flex;gap:28px;flex-wrap:wrap">';
+    html += '<div><div style="color:#888;font-size:12px">Pilot</div><div style="font-size:15px;font-weight:700">' + block.pilotName + '</div>';
+    if (block.pilotPhone) html += '<div style="font-size:12px;color:#555">' + block.pilotPhone + '</div>';
+    if (block.pilotCert)  html += '<div style="font-size:11px;color:#888">FAA Part 107: ' + block.pilotCert + '</div>';
+    html += '</div>';
+    html += '<div><div style="color:#888;font-size:12px">Date</div><div style="font-size:15px;font-weight:700">' + fmtDate(block.date) + '</div></div>';
+    html += '<div><div style="color:#888;font-size:12px">Orders</div><div style="font-size:15px;font-weight:700">' + block.rows.length + '</div></div>';
+    html += '<div><div style="color:#888;font-size:12px">Total Acres</div><div style="font-size:15px;font-weight:700">' + block.totalAcres.toFixed(1) + '</div></div>';
+    html += '</div></div>';
+    // Table
+    html += '<div class="section"><div class="section-title">Field Schedule</div><div style="overflow-x:auto">';
+    html += '<table class="day-table"><thead><tr><th>#</th><th>Customer</th><th>Fields / Notes</th><th>Crop</th><th>Acres</th><th>Mix Template</th><th>Products</th><th>GPS Coords</th></tr></thead><tbody>';
+    block.rows.forEach(function(r) {
+      var color = COLORS[(r.num - 1) % COLORS.length];
+      html += '<tr>';
+      html += '<td><span class="row-num" style="background:' + color + '">' + r.num + '</span></td>';
+      html += '<td>' + r.custName + '</td>';
+      html += '<td><strong>' + r.fieldNames + '</strong>' + (r.notes ? '<br><span style="color:#888;font-size:11px">' + r.notes + '</span>' : '') + '</td>';
+      html += '<td>' + r.crop + '</td>';
+      html += '<td class="num">' + r.acres.toFixed(1) + '</td>';
+      html += '<td style="font-size:11px">' + r.mix + '</td>';
+      html += '<td style="font-size:11px">' + (r.prods || '—') + '</td>';
+      html += '<td class="num" style="font-size:11px">' + (r.coords || '—') + '</td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table></div></div>';
+    // Map
+    html += '<div class="section"><div class="section-title">Field Map — numbered markers match schedule above</div>';
+    html += '<div id="daymap_' + bi + '" class="map-full"></div></div>';
+    html += '</div>'; // print-wrap
+    body.insertAdjacentHTML('beforeend', html);
   });
 })();
 <\/script>
@@ -2798,8 +2893,9 @@ function getReportDateRange() {
 
 function renderReports() {
   const { from, to, label } = getReportDateRange();
-  const pilotFilter  = document.getElementById('reportPilot')?.value  || '';
-  const statusFilter = document.getElementById('reportStatus')?.value || '';
+  const pilotFilter    = document.getElementById('reportPilot')?.value    || '';
+  const statusFilter   = document.getElementById('reportStatus')?.value   || '';
+  const customerFilter = document.getElementById('reportCustomer')?.value || '';
 
   // Populate pilot dropdown once
   const pilotSel = document.getElementById('reportPilot');
@@ -2811,13 +2907,24 @@ function renderReports() {
     });
   }
 
-  // Filter orders by date range, pilot, status
+  // Populate customer dropdown once
+  const custSel = document.getElementById('reportCustomer');
+  if (custSel && custSel.options.length <= 1) {
+    DB.customers.slice().sort((a,b) => (a.Name||'').localeCompare(b.Name||'')).forEach(c => {
+      const o = document.createElement('option');
+      o.value = c.CustomerID; o.textContent = c.Name;
+      custSel.appendChild(o);
+    });
+  }
+
+  // Filter orders by date range, customer, pilot, status
   const filtered = DB.orders.filter(o => {
     const d = o.ScheduledDate || o.OrderDate || '';
     if (!d) return false;
     if (d < from || d > to) return false;
-    if (pilotFilter  && o.PilotID  !== pilotFilter)  return false;
-    if (statusFilter && o.Status   !== statusFilter)  return false;
+    if (customerFilter && o.CustomerID !== customerFilter) return false;
+    if (pilotFilter    && o.PilotID    !== pilotFilter)    return false;
+    if (statusFilter   && o.Status     !== statusFilter)   return false;
     return true;
   }).sort((a, b) => (a.ScheduledDate||a.OrderDate||'').localeCompare(b.ScheduledDate||b.OrderDate||''));
 
@@ -3570,3 +3677,426 @@ function showToast(msg, type) {
   t.className = 'toast show ' + (type || '');
   setTimeout(() => { t.className = 'toast'; }, 3000);
 }
+
+// ── SMART SCHEDULING ─────────────────────────────────────────────────────────
+
+let scheduleState = {
+  weekStart:    null,   // Monday of displayed week (YYYY-MM-DD)
+  activePilot:  '',     // '' = show all pilots
+  showAll:      false,  // include orders that already have a date
+  dragging:     null,   // { orderId, fromDay } during drag
+  dayDetail:    null,   // date string currently shown in map panel
+  detailMap:    null,   // Leaflet map instance for day detail
+};
+
+// ── DATE HELPERS ─────────────────────────────────────────────────────────────
+function schedWeekDates(weekStart) {
+  const dates = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(weekStart + 'T12:00:00');
+    d.setDate(d.getDate() + i);
+    dates.push(d.toISOString().split('T')[0]);
+  }
+  return dates;
+}
+
+function schedMonday(fromDate) {
+  const d = new Date((fromDate || new Date().toISOString().split('T')[0]) + 'T12:00:00');
+  const day = d.getDay();
+  d.setDate(d.getDate() - (day === 0 ? 6 : day - 1));
+  return d.toISOString().split('T')[0];
+}
+
+function schedFmtDay(dateStr) {
+  const d = new Date(dateStr + 'T12:00:00');
+  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'numeric', day: 'numeric' });
+}
+
+// ── NEAREST-NEIGHBOR AUTO-ROUTE ───────────────────────────────────────────────
+function autoRouteDay(dateStr, pilotId) {
+  const home = AppSettings.homeBaseLat && AppSettings.homeBaseLng
+    ? { lat: parseFloat(AppSettings.homeBaseLat), lng: parseFloat(AppSettings.homeBaseLng) }
+    : null;
+
+  if (!home) { showToast('Set a home base in Settings first', 'error'); return; }
+
+  const dayOrders = DB.orders.filter(o =>
+    o.ScheduledDate === dateStr &&
+    (!pilotId || o.PilotID === pilotId)
+  );
+
+  if (dayOrders.length < 2) { showToast('Need at least 2 fields to auto-route', 'error'); return; }
+
+  // Get centroids
+  const withPos = dayOrders.map(o => {
+    const of = DB.orderFields.find(f => f.OrderID === o.OrderID);
+    const f  = of ? DB.fields.find(x => x.FieldID === of.FieldID) : null;
+    const lat = parseFloat(f?.CentroidLat || o.CentroidLat);
+    const lng = parseFloat(f?.CentroidLng || o.CentroidLng);
+    return { order: o, lat: isNaN(lat) ? null : lat, lng: isNaN(lng) ? null : lng };
+  }).filter(x => x.lat !== null);
+
+  if (withPos.length < 2) { showToast('Not enough GPS data to auto-route', 'error'); return; }
+
+  // Nearest-neighbor greedy from home base
+  let current = home;
+  const unvisited = [...withPos];
+  const sorted = [];
+  while (unvisited.length) {
+    let best = 0, bestDist = Infinity;
+    unvisited.forEach((x, i) => {
+      const d = GeoUtils.haversineKm(current, x);
+      if (d < bestDist) { bestDist = d; best = i; }
+    });
+    sorted.push(unvisited.splice(best, 1)[0]);
+    current = sorted[sorted.length - 1];
+  }
+
+  // Store display order in localStorage (no sheet column for sequence)
+  const key = `sched_order_${dateStr}_${pilotId || 'all'}`;
+  const orderedIds = sorted.map(x => x.order.OrderID);
+  try { localStorage.setItem(key, JSON.stringify(orderedIds)); } catch(e) {}
+
+  renderSchedule();
+  showToast(`Auto-routed ${sorted.length} fields`, 'success');
+}
+
+function getScheduleOrder(dateStr, pilotId) {
+  const key = `sched_order_${dateStr}_${pilotId || 'all'}`;
+  try {
+    const s = localStorage.getItem(key);
+    return s ? JSON.parse(s) : null;
+  } catch(e) { return null; }
+}
+
+// ── ASSIGN ORDER TO DATE + PILOT ─────────────────────────────────────────────
+async function schedAssign(orderId, newDate, newPilotId) {
+  const o = DB.orders.find(x => x.OrderID === orderId);
+  if (!o) return;
+
+  const prevDate   = o.ScheduledDate;
+  const prevPilot  = o.PilotID;
+  const prevStatus = o.Status;
+
+  o.ScheduledDate = newDate;
+  if (newPilotId) {
+    const p = DB.pilots.find(x => x.PilotID === newPilotId);
+    o.PilotID   = newPilotId;
+    o.PilotName = p?.Name || o.PilotName;
+  }
+  if (newDate && o.Status === 'Open') o.Status = 'Scheduled';
+  saveToLocalStorage();
+  renderSchedule();
+
+  try {
+    await writeRow('orders', o);
+  } catch(e) {
+    showToast('Save failed — changes reverted', 'error');
+    o.ScheduledDate = prevDate;
+    o.PilotID       = prevPilot;
+    o.Status        = prevStatus;
+    saveToLocalStorage();
+    renderSchedule();
+  }
+}
+
+// ── MAIN RENDER ───────────────────────────────────────────────────────────────
+function renderSchedule() {
+  const el = document.getElementById('scheduleContent');
+  if (!el) return;
+
+  if (!scheduleState.weekStart) {
+    scheduleState.weekStart = schedMonday(null);
+  }
+
+  const weekDates  = schedWeekDates(scheduleState.weekStart);
+  const pilots     = DB.pilots.filter(p => p.Active === 'Yes');
+  const activePilot = scheduleState.activePilot;
+
+  // Pool: orders without a ScheduledDate (or all if showAll)
+  const poolOrders = DB.orders.filter(o => {
+    if (!['Open','Scheduled'].includes(o.Status)) return false;
+    if (!scheduleState.showAll && o.ScheduledDate) return false;
+    if (activePilot && o.PilotID && o.PilotID !== activePilot) return false;
+    return true;
+  }).sort((a, b) => {
+    // Sort by GDU urgency first, then customer name
+    const ga = gduResults.find(r => r.orderId === a.OrderID);
+    const gb = gduResults.find(r => r.orderId === b.OrderID);
+    const ua = ga ? (ga.pctToTarget || 0) : 0;
+    const ub = gb ? (gb.pctToTarget || 0) : 0;
+    if (ub !== ua) return ub - ua;
+    return (a.CustomerName || '').localeCompare(b.CustomerName || '');
+  });
+
+  // Pool HTML
+  const poolHtml = poolOrders.length === 0
+    ? '<div class="sched-pool-empty">All orders scheduled</div>'
+    : poolOrders.map(o => {
+        const of  = DB.orderFields.filter(f => f.OrderID === o.OrderID);
+        const gr  = gduResults.find(r => r.orderId === o.OrderID);
+        const urg = gr ? GDUCalc.urgencyClass(gr) : '';
+        const urgDot = urg ? `<span class="sched-urg-dot sched-urg-${urg}" title="${urg}"></span>` : '';
+        const fieldLabel = of.map(f => f.FieldName).join(', ') || '—';
+        const pilotLabel = o.PilotName ? `<span class="sched-chip">${o.PilotName}</span>` : '';
+        return `<div class="sched-pool-card" draggable="true"
+            data-order-id="${o.OrderID}"
+            ondragstart="schedDragStart(event,'${o.OrderID}','')"
+            ondragend="schedDragEnd(event)">
+          <div class="sched-card-top">
+            ${urgDot}
+            <span class="sched-card-field">${fieldLabel}</span>
+            <span class="sched-card-acres">${parseFloat(o.TotalAcres||0).toFixed(1)} ac</span>
+          </div>
+          <div class="sched-card-sub">${o.CustomerName} · ${o.CropType||'—'} ${pilotLabel}</div>
+        </div>`;
+      }).join('');
+
+  // Week grid columns
+  const colsHtml = weekDates.map(date => {
+    let dayOrders = DB.orders.filter(o => o.ScheduledDate === date &&
+      (!activePilot || o.PilotID === activePilot) &&
+      ['Open','Scheduled','Completed'].includes(o.Status));
+
+    // Apply stored route order if present
+    const routeOrder = getScheduleOrder(date, activePilot);
+    if (routeOrder) {
+      dayOrders = [
+        ...routeOrder.map(id => dayOrders.find(o => o.OrderID === id)).filter(Boolean),
+        ...dayOrders.filter(o => !routeOrder.includes(o.OrderID))
+      ];
+    }
+
+    const totalAc = dayOrders.reduce((s, o) => s + parseFloat(o.TotalAcres || 0), 0);
+    const target  = activePilot
+      ? (AppSettings.pilotTargets?.[activePilot] || AppSettings.defaultDailyAcres || 200)
+      : (AppSettings.defaultDailyAcres || 200);
+    const pct     = Math.min(100, (totalAc / target) * 100);
+    const barColor= pct >= 100 ? 'var(--danger)' : pct >= 80 ? 'var(--warn)' : 'var(--accent2)';
+    const isToday = date === new Date().toISOString().split('T')[0];
+    const isActive = scheduleState.dayDetail === date;
+
+    const cardsHtml = dayOrders.map(o => {
+      const of = DB.orderFields.filter(f => f.OrderID === o.OrderID);
+      const gr = gduResults.find(r => r.orderId === o.OrderID);
+      const urg = gr ? GDUCalc.urgencyClass(gr) : '';
+      const urgDot = urg ? `<span class="sched-urg-dot sched-urg-${urg}"></span>` : '';
+      const statusDot = o.Status === 'Completed' ? '✓ ' : '';
+      return `<div class="sched-day-card ${o.Status === 'Completed' ? 'sched-done' : ''}"
+          draggable="true"
+          data-order-id="${o.OrderID}"
+          ondragstart="schedDragStart(event,'${o.OrderID}','${date}')"
+          ondragend="schedDragEnd(event)"
+          onclick="event.stopPropagation();viewOrder('${o.OrderID}')">
+        <div class="sched-card-top">
+          ${urgDot}${statusDot}
+          <span class="sched-card-field" style="font-size:0.75rem">${of.map(f=>f.FieldName).join(', ')||'—'}</span>
+          <span class="sched-card-acres" style="font-size:0.72rem">${parseFloat(o.TotalAcres||0).toFixed(1)}ac</span>
+        </div>
+        ${o.PilotName && !activePilot ? `<div style="font-size:0.7rem;color:var(--text-sub)">${o.PilotName}</div>` : ''}
+      </div>`;
+    }).join('');
+
+    return `<div class="sched-day-col ${isToday ? 'sched-today' : ''} ${isActive ? 'sched-day-active' : ''}"
+        data-date="${date}"
+        ondragover="event.preventDefault();event.currentTarget.classList.add('sched-drop-target')"
+        ondragleave="event.currentTarget.classList.remove('sched-drop-target')"
+        ondrop="schedDrop(event,'${date}')"
+        onclick="schedSelectDay('${date}')">
+      <div class="sched-day-header">
+        <span class="sched-day-label ${isToday ? 'sched-today-label' : ''}">${schedFmtDay(date)}</span>
+        <span class="sched-day-acres">${totalAc.toFixed(1)} / ${target} ac</span>
+      </div>
+      <div class="sched-acre-bar"><div class="sched-acre-fill" style="width:${pct}%;background:${barColor}"></div></div>
+      <div class="sched-day-cards">${cardsHtml}</div>
+      <div class="sched-day-footer">
+        <button class="sched-route-btn" onclick="event.stopPropagation();autoRouteDay('${date}','${activePilot}')" title="Auto-route by distance">⇌ Route</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  // Pilot filter pills
+  const pillsHtml = [{ PilotID: '', Name: 'All Pilots' }, ...pilots].map(p =>
+    `<button class="sched-pilot-pill ${scheduleState.activePilot === p.PilotID ? 'active' : ''}"
+      onclick="scheduleState.activePilot='${p.PilotID}';renderSchedule()">${p.Name}</button>`
+  ).join('');
+
+  el.innerHTML = `
+    <div class="sched-toolbar">
+      <div class="sched-nav">
+        <button class="btn-ghost sched-nav-btn" onclick="schedChangeWeek(-1)">‹ Prev</button>
+        <span class="sched-week-label">${schedFmtDay(weekDates[0])} – ${schedFmtDay(weekDates[6])}</span>
+        <button class="btn-ghost sched-nav-btn" onclick="schedChangeWeek(1)">Next ›</button>
+        <button class="btn-ghost sched-nav-btn" onclick="scheduleState.weekStart=schedMonday(null);renderSchedule()">Today</button>
+      </div>
+      <div class="sched-pilots">${pillsHtml}</div>
+      <label class="sched-showall-label">
+        <input type="checkbox" ${scheduleState.showAll ? 'checked' : ''} onchange="scheduleState.showAll=this.checked;renderSchedule()">
+        Show scheduled in pool
+      </label>
+    </div>
+    <div class="sched-body">
+      <div class="sched-pool">
+        <div class="sched-pool-header">
+          Unscheduled <span class="sched-pool-count">${poolOrders.length}</span>
+          ${!AppSettings.homeBaseLat ? '<div class="sched-warn">⚠ Set home base in Settings to enable auto-route</div>' : ''}
+        </div>
+        <div class="sched-pool-list">${poolHtml}</div>
+      </div>
+      <div class="sched-grid">
+        <div class="sched-cols">${colsHtml}</div>
+      </div>
+      <div class="sched-detail" id="schedDetail">
+        <div class="sched-detail-placeholder">Click a day to see field map</div>
+      </div>
+    </div>`;
+
+  // Render detail map if a day is selected
+  if (scheduleState.dayDetail) {
+    schedRenderDetail(scheduleState.dayDetail);
+  }
+}
+
+function schedChangeWeek(dir) {
+  const d = new Date(scheduleState.weekStart + 'T12:00:00');
+  d.setDate(d.getDate() + dir * 7);
+  scheduleState.weekStart = d.toISOString().split('T')[0];
+  renderSchedule();
+}
+
+function schedSelectDay(date) {
+  scheduleState.dayDetail = scheduleState.dayDetail === date ? null : date;
+  renderSchedule();
+}
+
+// ── DAY DETAIL MAP ────────────────────────────────────────────────────────────
+function schedRenderDetail(date) {
+  const el = document.getElementById('schedDetail');
+  if (!el) return;
+
+  const activePilot = scheduleState.activePilot;
+  let dayOrders = DB.orders.filter(o => o.ScheduledDate === date &&
+    (!activePilot || o.PilotID === activePilot));
+
+  const routeOrder = getScheduleOrder(date, activePilot);
+  if (routeOrder) {
+    dayOrders = [
+      ...routeOrder.map(id => dayOrders.find(o => o.OrderID === id)).filter(Boolean),
+      ...dayOrders.filter(o => !routeOrder.includes(o.OrderID))
+    ];
+  }
+
+  if (!dayOrders.length) {
+    el.innerHTML = '<div class="sched-detail-placeholder">No orders on this day</div>';
+    return;
+  }
+
+  const COLORS = ['#4FC3F7','#81C784','#FFB74D','#F48FB1','#CE93D8','#80DEEA','#FFCC02','#a5d6a7'];
+
+  const listHtml = dayOrders.map((o, i) => {
+    const of = DB.orderFields.filter(f => f.OrderID === o.OrderID);
+    const color = COLORS[i % COLORS.length];
+    return `<div class="sched-detail-row" style="border-left:3px solid ${color}">
+      <span class="sched-detail-num" style="background:${color}">${i+1}</span>
+      <div class="sched-detail-info">
+        <div class="sched-detail-field">${of.map(f=>f.FieldName).join(', ')||'—'}</div>
+        <div class="sched-detail-sub">${o.CustomerName} · ${parseFloat(o.TotalAcres||0).toFixed(1)} ac</div>
+      </div>
+    </div>`;
+  }).join('');
+
+  el.innerHTML = `
+    <div class="sched-detail-header">${schedFmtDay(date)}</div>
+    <div class="sched-detail-list">${listHtml}</div>
+    <div id="schedDetailMap" style="height:280px;border-radius:var(--radius);overflow:hidden;margin-top:0.5rem"></div>`;
+
+  // Render map
+  if (typeof L === 'undefined') return;
+  if (scheduleState.detailMap) { scheduleState.detailMap.remove(); scheduleState.detailMap = null; }
+
+  setTimeout(() => {
+    const mapEl = document.getElementById('schedDetailMap');
+    if (!mapEl) return;
+    const m = L.map(mapEl, { zoomControl: true });
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19 }).addTo(m);
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, opacity: 0.7 }).addTo(m);
+    scheduleState.detailMap = m;
+
+    const bounds = [];
+
+    // Home base marker
+    if (AppSettings.homeBaseLat && AppSettings.homeBaseLng) {
+      const hll = [parseFloat(AppSettings.homeBaseLat), parseFloat(AppSettings.homeBaseLng)];
+      L.marker(hll, { icon: L.divIcon({ className: '', iconSize: [20,20], iconAnchor: [10,10],
+        html: '<div style="width:20px;height:20px;background:#fff;border:3px solid #1a2332;border-radius:50%;box-shadow:0 1px 4px rgba(0,0,0,0.4)"></div>'
+      }) }).bindTooltip(AppSettings.homeBaseLabel || 'Home Base').addTo(m);
+      bounds.push(hll);
+    }
+
+    dayOrders.forEach((o, i) => {
+      const color = COLORS[i % COLORS.length];
+      const icon  = L.divIcon({ className: '', iconSize: [24,24], iconAnchor: [12,12],
+        html: `<div style="width:24px;height:24px;background:${color};color:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:11px;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.4)">${i+1}</div>` });
+
+      const of = DB.orderFields.filter(f => f.OrderID === o.OrderID);
+      of.forEach(ofRow => {
+        const f = DB.fields.find(x => x.FieldID === ofRow.FieldID);
+        if (!f) return;
+        if (f.PolygonKML) {
+          GeoUtils.parseKMLAllRings(f.PolygonKML).forEach(pts => {
+            if (pts.length >= 3) {
+              const ll = pts.map(p => [p.lat, p.lng]);
+              L.polygon(ll, { color, weight: 2, fillColor: color, fillOpacity: 0.25 }).addTo(m);
+              ll.forEach(x => bounds.push(x));
+            }
+          });
+        }
+        if (f.CentroidLat && f.CentroidLng) {
+          const fll = [parseFloat(f.CentroidLat), parseFloat(f.CentroidLng)];
+          if (!isNaN(fll[0])) {
+            L.marker(fll, { icon }).bindTooltip(`${i+1}. ${f.FieldName}`).addTo(m);
+            if (!f.PolygonKML) bounds.push(fll);
+          }
+        }
+      });
+    });
+
+    // Route line between field centroids in order
+    const routePts = [];
+    if (AppSettings.homeBaseLat) routePts.push([parseFloat(AppSettings.homeBaseLat), parseFloat(AppSettings.homeBaseLng)]);
+    dayOrders.forEach(o => {
+      const of = DB.orderFields.find(f => f.OrderID === o.OrderID);
+      const f  = of ? DB.fields.find(x => x.FieldID === of.FieldID) : null;
+      if (f?.CentroidLat) routePts.push([parseFloat(f.CentroidLat), parseFloat(f.CentroidLng)]);
+    });
+    if (routePts.length > 1) {
+      L.polyline(routePts, { color: '#fff', weight: 1.5, dashArray: '6 4', opacity: 0.6 }).addTo(m);
+    }
+
+    if (bounds.length) m.fitBounds(bounds, { padding: [20, 20] });
+  }, 80);
+}
+
+// ── DRAG AND DROP ─────────────────────────────────────────────────────────────
+function schedDragStart(event, orderId, fromDay) {
+  scheduleState.dragging = { orderId, fromDay };
+  event.dataTransfer.effectAllowed = 'move';
+  event.dataTransfer.setData('text/plain', orderId);
+  setTimeout(() => event.target.classList.add('sched-dragging'), 0);
+}
+
+function schedDragEnd(event) {
+  event.target.classList.remove('sched-dragging');
+  document.querySelectorAll('.sched-drop-target').forEach(el => el.classList.remove('sched-drop-target'));
+  scheduleState.dragging = null;
+}
+
+function schedDrop(event, toDay) {
+  event.preventDefault();
+  event.currentTarget.classList.remove('sched-drop-target');
+  const orderId = event.dataTransfer.getData('text/plain');
+  if (!orderId) return;
+  const pilotId = scheduleState.activePilot || '';
+  schedAssign(orderId, toDay, pilotId || null);
+}
+
