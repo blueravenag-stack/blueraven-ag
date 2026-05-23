@@ -3839,16 +3839,22 @@ function renderSchedule() {
         const urgDot = urg ? `<span class="sched-urg-dot sched-urg-${urg}" title="${urg}"></span>` : '';
         const fieldLabel = of.map(f => f.FieldName).join(', ') || '—';
         const pilotLabel = o.PilotName ? `<span class="sched-chip">${o.PilotName}</span>` : '';
-        return `<div class="sched-pool-card" draggable="true"
+        const isSelected = _schedSelected === o.OrderID;
+        const gr2 = gduResults.find(r => r.orderId === o.OrderID);
+        const suggestDate = gr2?.targetDate || '';
+        const suggestLabel = suggestDate ? 'GDU target: ' + schedFmtDay(suggestDate) : '';
+        return `<div class="sched-pool-card ${isSelected ? 'sched-pool-selected' : ''}" draggable="true"
             data-order-id="${o.OrderID}"
             ondragstart="schedDragStart(event,'${o.OrderID}','')"
-            ondragend="schedDragEnd(event)">
+            ondragend="schedDragEnd(event)"
+            onclick="schedSelectCard('${o.OrderID}')">
           <div class="sched-card-top">
             ${urgDot}
             <span class="sched-card-field">${fieldLabel}</span>
             <span class="sched-card-acres">${parseFloat(o.TotalAcres||0).toFixed(1)} ac</span>
           </div>
           <div class="sched-card-sub">${o.CustomerName} · ${o.CropType||'—'} ${pilotLabel}</div>
+          ${suggestLabel ? '<div class="sched-suggest-label">' + suggestLabel + '</div>' : ''}
         </div>`;
       }).join('');
 
@@ -3892,17 +3898,19 @@ function renderSchedule() {
           ${urgDot}${statusDot}
           <span class="sched-card-field" style="font-size:0.75rem">${of.map(f=>f.FieldName).join(', ')||'—'}</span>
           <span class="sched-card-acres" style="font-size:0.72rem">${parseFloat(o.TotalAcres||0).toFixed(1)}ac</span>
+          <button class="sched-unassign-btn" onclick="schedUnassign('${o.OrderID}',event)" title="Return to pool">✕</button>
         </div>
         ${o.PilotName && !activePilot ? `<div style="font-size:0.7rem;color:var(--text-sub)">${o.PilotName}</div>` : ''}
       </div>`;
     }).join('');
 
-    return `<div class="sched-day-col ${isToday ? 'sched-today' : ''} ${isActive ? 'sched-day-active' : ''}"
+    const isTapTarget = !!_schedSelected;
+    return `<div class="sched-day-col ${isToday ? 'sched-today' : ''} ${isActive ? 'sched-day-active' : ''} ${isTapTarget ? 'sched-tap-target' : ''}"
         data-date="${date}"
         ondragover="event.preventDefault();event.currentTarget.classList.add('sched-drop-target')"
         ondragleave="event.currentTarget.classList.remove('sched-drop-target')"
         ondrop="schedDrop(event,'${date}')"
-        onclick="schedSelectDay('${date}')">
+        onclick="schedTapDay('${date}')">
       <div class="sched-day-header">
         <span class="sched-day-label ${isToday ? 'sched-today-label' : ''}">${schedFmtDay(date)}</span>
         <span class="sched-day-acres">${totalAc.toFixed(1)} / ${target} ac</span>
@@ -3939,7 +3947,12 @@ function renderSchedule() {
       <div class="sched-pool">
         <div class="sched-pool-header">
           Unscheduled <span class="sched-pool-count">${poolOrders.length}</span>
-          ${!AppSettings.homeBaseLat ? '<div class="sched-warn">⚠ Set home base in Settings to enable auto-route</div>' : ''}
+          <div class="sched-instructions">${
+            _schedSelected
+              ? '👆 Now tap a day to assign'
+              : poolOrders.length ? 'Tap a card, then tap a day' : ''
+          }</div>
+          ${!AppSettings.homeBaseLat ? '<div class="sched-warn">⚠ Set home base in Settings for auto-route</div>' : ''}
         </div>
         <div class="sched-pool-list">${poolHtml}</div>
       </div>
@@ -4077,7 +4090,32 @@ function schedRenderDetail(date) {
   }, 80);
 }
 
-// ── DRAG AND DROP ─────────────────────────────────────────────────────────────
+// ── DRAG AND DROP + TAP-TO-ASSIGN (iOS-compatible) ───────────────────────────
+let _schedSelected = null; // orderId currently tapped/selected in pool
+
+function schedSelectCard(orderId) {
+  // Tap pool card: select it (or deselect if already selected)
+  if (_schedSelected === orderId) {
+    _schedSelected = null;
+  } else {
+    _schedSelected = orderId;
+  }
+  renderSchedule();
+  if (_schedSelected) showToast('Tap a day column to assign', 'info');
+}
+
+function schedTapDay(date) {
+  // If a card is selected, assign it; otherwise open detail
+  if (_schedSelected) {
+    const pilotId = scheduleState.activePilot || null;
+    schedAssign(_schedSelected, date, pilotId);
+    _schedSelected = null;
+  } else {
+    schedSelectDay(date);
+  }
+}
+
+// HTML5 drag (desktop)
 function schedDragStart(event, orderId, fromDay) {
   scheduleState.dragging = { orderId, fromDay };
   event.dataTransfer.effectAllowed = 'move';
@@ -4098,5 +4136,14 @@ function schedDrop(event, toDay) {
   if (!orderId) return;
   const pilotId = scheduleState.activePilot || '';
   schedAssign(orderId, toDay, pilotId || null);
+}
+
+// Unschedule an order (move back to pool)
+function schedUnassign(orderId, event) {
+  if (event) event.stopPropagation();
+  const o = DB.orders.find(x => x.OrderID === orderId);
+  if (!o) return;
+  if (!confirm('Remove from schedule and return to pool?')) return;
+  schedAssign(orderId, '', null);
 }
 

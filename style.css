@@ -931,8 +931,9 @@ body.light .leaflet-container { background: #e8e8e8; }
 
 
 /* ── SMART SCHEDULING ──────────────────────────────────────────────────────── */
-#view-schedule { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
-#scheduleContent { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+#view-schedule { display: none; }
+#view-schedule.active { display: flex; flex-direction: column; height: calc(100vh - 56px); overflow: hidden; }
+#scheduleContent { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
 
 .sched-toolbar {
   display: flex; align-items: center; flex-wrap: wrap; gap: 0.6rem;
@@ -955,7 +956,7 @@ body.light .leaflet-container { background: #e8e8e8; }
 
 /* Three-panel body */
 .sched-body {
-  display: flex; flex: 1; overflow: hidden; gap: 0;
+  display: flex; flex: 1; overflow: hidden; gap: 0; min-height: 0;
 }
 
 /* Pool */
@@ -1002,14 +1003,14 @@ body.light .leaflet-container { background: #e8e8e8; }
 .sched-urg-early    { background: var(--text-sub); }
 
 /* Week grid */
-.sched-grid { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
-.sched-cols { display: flex; flex: 1; overflow-x: auto; overflow-y: hidden; }
+.sched-grid { flex: 1; overflow: hidden; display: flex; flex-direction: column; min-height: 0; }
+.sched-cols { display: flex; flex: 1; overflow-x: auto; overflow-y: hidden; min-height: 0; }
 
 /* Day column */
 .sched-day-col {
-  flex: 1; min-width: 120px; max-width: 200px;
+  flex: 1; min-width: 130px; max-width: 200px;
   border-right: 1px solid var(--border); display: flex; flex-direction: column;
-  transition: background 0.15s; cursor: pointer;
+  transition: background 0.15s; cursor: pointer; min-height: 0; height: 100%;
 }
 .sched-day-col:last-child { border-right: none; }
 .sched-day-col.sched-today { background: rgba(79,195,247,0.04); }
@@ -1065,3 +1066,31 @@ body.light .leaflet-container { background: #e8e8e8; }
   .sched-grid { height: 300px; flex-shrink: 0; }
   .sched-detail { width: 100%; border-left: none; border-top: 1px solid var(--border); }
 }
+
+/* Tap-to-assign interaction */
+.sched-pool-selected {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 2px var(--accent);
+}
+.sched-tap-target .sched-day-header {
+  background: rgba(79,195,247,0.12);
+}
+.sched-tap-target { border: 1.5px dashed var(--accent); }
+
+/* GDU suggestion label on pool cards */
+.sched-suggest-label {
+  font-size: 0.68rem; color: var(--accent2); margin-top: 2px; font-weight: 500;
+}
+
+/* Instructions row in pool header */
+.sched-instructions {
+  font-size: 0.72rem; color: var(--accent); margin-top: 3px; font-weight: 500;
+}
+
+/* Unassign button on day cards */
+.sched-unassign-btn {
+  border: none; background: none; color: var(--text-sub); cursor: pointer;
+  font-size: 0.7rem; padding: 0 2px; margin-left: auto; flex-shrink: 0; line-height: 1;
+}
+.sched-unassign-btn:hover { color: var(--danger); }
+
