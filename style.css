@@ -1094,3 +1094,26 @@ body.light .leaflet-container { background: #e8e8e8; }
 }
 .sched-unassign-btn:hover { color: var(--danger); }
 
+/* Detail panel close button */
+.sched-detail-header { display: flex; align-items: center; justify-content: space-between; }
+.sched-detail-close {
+  border: none; background: none; color: var(--text-sub); cursor: pointer;
+  font-size: 0.9rem; padding: 0 2px; line-height: 1;
+}
+.sched-detail-close:hover { color: var(--danger); }
+
+/* Day card action row */
+.sched-card-actions {
+  display: flex; align-items: center; gap: 3px; margin-top: 3px;
+}
+.sched-move-btn {
+  border: none; background: none; color: var(--text-sub); cursor: pointer;
+  font-size: 0.6rem; padding: 1px 3px; border-radius: 3px; line-height: 1;
+}
+.sched-move-btn:hover { background: var(--bg2); color: var(--accent); }
+
+/* Pool card meta row */
+.sched-card-meta {
+  font-size: 0.68rem; color: var(--text-sub); margin-top: 2px;
+}
+
