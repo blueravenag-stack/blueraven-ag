@@ -1935,7 +1935,7 @@ function renderSettings() {
       <div class="detail-row"><span>Version</span><span>${AppParams.version || '—'}</span></div>
       <div class="detail-row"><span>Sheet ID</span><span style="font-family:var(--font-mono);font-size:0.75rem">${SHEET_ID}</span></div>
     </div>
-  \`;
+  `;
 }
 
 function saveSettingsUI() {
