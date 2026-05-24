@@ -3895,7 +3895,8 @@ function buildSchedCardBody(o, { compact = false } = {}) {
 
     // GDU window — vtDate is true VT (100%), windowEnd is R2 cutoff
     if (gr && gr.vtDate) {
-      html += `<div class="sched-suggest-label">VT: ${fmtDate(gr.vtDate)} → R2: ${fmtDate(gr.windowEnd)}</div>`;
+      const fmtShort = d => { try { const dt=new Date(d+'T12:00:00'); return dt.toLocaleDateString('en-US',{month:'short',day:'numeric'}); } catch(e){return d||'';} };
+      html += `<div class="sched-suggest-label">VT ${fmtShort(gr.vtDate)} · R2 ${fmtShort(gr.windowEnd)}</div>`;
     }
 
     // Products (toggled by scheduleState.showProducts)
@@ -4014,14 +4015,15 @@ function renderSchedule() {
       </div>`;
     }).join('');
 
-    const sectionTarget = target ? ` — target ${target} ac/day` : '';
-    const headerClass   = isUnassigned ? 'sched-pilot-row-unassigned' : 'sched-pilot-row-header';
-    return `<div class="sched-pilot-row">
-      <div class="${headerClass}">
-        <span class="sched-pilot-row-name">${pilotName}${sectionTarget}</span>
-        ${!isUnassigned ? `<button class="sched-route-btn" style="margin-left:auto"
+    const targetLabel = target ? `${target} ac` : '';
+    const isActive    = scheduleState.detailPilot === (pilotId||'') && scheduleState.dayDetail;
+    return `<div class="sched-pilot-row ${isUnassigned ? 'sched-pilot-row-ua' : ''}">
+      <div class="sched-pilot-label">
+        <span class="sched-pilot-label-name">${pilotName}</span>
+        ${targetLabel ? `<span class="sched-pilot-label-target">${targetLabel}/day</span>` : ''}
+        ${!isUnassigned ? `<button class="sched-route-btn sched-route-week"
           onclick="autoRouteWeek('${pilotId}')"
-          title="Auto-route all days this week">⇌ Week</button>` : ''}
+          title="Auto-route all days this week">⇌</button>` : ''}
       </div>
       <div class="sched-cols">${dayColsHtml}</div>
     </div>`;

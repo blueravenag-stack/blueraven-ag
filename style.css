@@ -960,10 +960,7 @@ body.light .leaflet-container { background: #e8e8e8; }
 }
 
 /* Pool */
-.sched-pool {
-  width: 200px; flex-shrink: 0; border-right: 1px solid var(--border);
-  display: flex; flex-direction: column; background: var(--bg2); overflow: hidden;
-}
+/* sched-pool — see v4.7 section below */
 .sched-pool-header {
   padding: 0.5rem 0.75rem; font-size: 0.75rem; font-weight: 600;
   text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-sub);
@@ -1004,7 +1001,7 @@ body.light .leaflet-container { background: #e8e8e8; }
 
 /* Week grid */
 .sched-grid { flex: 1; overflow: hidden; display: flex; flex-direction: column; min-height: 0; }
-.sched-cols { display: flex; flex: 1; overflow-x: auto; overflow-y: hidden; min-height: 0; }
+.sched-cols { display: flex; overflow-x: auto; overflow-y: visible; min-height: 0; }
 
 /* Day column */
 .sched-day-col {
@@ -1060,8 +1057,7 @@ body.light .leaflet-container { background: #e8e8e8; }
 /* Mobile: stack panels */
 @media (max-width: 700px) {
   .sched-body { flex-direction: column; overflow-y: auto; }
-  .sched-pool { width: 100%; height: 180px; border-right: none; border-bottom: 1px solid var(--border); }
-  .sched-pool-list { display: flex; flex-direction: row; overflow-x: auto; overflow-y: hidden; padding: 0.3rem; }
+  /* pool mobile — handled in v4.7 section */
   .sched-pool-card { min-width: 140px; margin-right: 0.35rem; margin-bottom: 0; }
   .sched-grid { height: 300px; flex-shrink: 0; }
   .sched-detail { width: 100%; border-left: none; border-top: 1px solid var(--border); }
@@ -1162,50 +1158,74 @@ body.light .leaflet-container { background: #e8e8e8; }
 .sched-toggle-btn {
   padding: 0.25rem 0.65rem; border-radius: 99px; font-size: 0.78rem; font-weight: 500;
   border: 1px solid var(--border); background: transparent; color: var(--text-sub);
-  cursor: pointer; transition: all 0.15s;
+  cursor: pointer; transition: all 0.15s; white-space: nowrap;
 }
 .sched-toggle-btn.active { background: var(--bg3); color: var(--text); border-color: var(--accent); }
 
-/* Week header row — date labels above all pilot rows */
-.sched-week-header {
-  display: flex; padding-left: 130px; border-bottom: 1px solid var(--border);
-  background: var(--bg2); flex-shrink: 0;
-}
-.sched-week-day-lbl {
-  flex: 1; min-width: 110px; font-size: 0.75rem; font-weight: 600;
-  padding: 0.3rem 0.5rem; color: var(--text-sub); border-right: 1px solid var(--border);
-}
-.sched-week-day-lbl:last-child { border-right: none; }
-.sched-week-day-lbl.sched-today-label { color: var(--accent); }
-
-/* Pilot rows container */
-.sched-pilot-rows { flex: 1; overflow-y: auto; }
-
-/* One pilot section */
-.sched-pilot-row { display: flex; flex-direction: column; border-bottom: 2px solid var(--border); }
-
-/* Pilot section header */
-.sched-pilot-row-header, .sched-pilot-row-unassigned {
-  display: flex; align-items: center; padding: 0.35rem 0.5rem;
-  font-size: 0.8rem; font-weight: 600; background: var(--bg2);
-  border-bottom: 1px solid var(--border); min-width: 0; gap: 0.5rem;
-}
-.sched-pilot-row-unassigned { color: var(--text-sub); font-weight: 400; font-style: italic; }
-.sched-pilot-row-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-
-/* Day columns inside each pilot row */
-.sched-pilot-row .sched-cols {
-  display: flex; overflow-x: auto; min-height: 80px;
-}
-
-/* Adjust grid to not use old height:100% chain */
+/* Grid — flex column containing week header + pilot rows */
 .sched-grid {
   flex: 1; overflow: hidden; display: flex; flex-direction: column; min-height: 0;
 }
 
+/* Week date header — offset by pilot label width */
+.sched-week-header {
+  display: flex; margin-left: 90px; border-bottom: 1px solid var(--border);
+  background: var(--bg2); flex-shrink: 0; overflow-x: hidden;
+}
+.sched-week-day-lbl {
+  flex: 1; min-width: 120px; font-size: 0.72rem; font-weight: 600;
+  padding: 0.25rem 0.4rem; color: var(--text-sub);
+  border-right: 1px solid var(--border);
+}
+.sched-week-day-lbl:last-child { border-right: none; }
+.sched-week-day-lbl.sched-today-label { color: var(--accent); }
+
+/* Pilot rows scroll vertically */
+.sched-pilot-rows { flex: 1; overflow-y: auto; min-height: 0; }
+
+/* One pilot row — flex-row: label | day-cols */
+.sched-pilot-row {
+  display: flex; flex-direction: row; border-bottom: 2px solid var(--border);
+  align-items: stretch; min-height: 120px;
+}
+.sched-pilot-row-ua { opacity: 0.75; }
+
+/* LEFT: sticky pilot label */
+.sched-pilot-label {
+  width: 90px; flex-shrink: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 0.4rem 0.3rem; gap: 0.2rem;
+  background: var(--bg2); border-right: 2px solid var(--border);
+  position: sticky; left: 0; z-index: 2;
+}
+.sched-pilot-label-name {
+  font-size: 0.78rem; font-weight: 600; text-align: center;
+  word-break: break-word; line-height: 1.3; color: var(--text);
+}
+.sched-pilot-label-target {
+  font-size: 0.65rem; color: var(--text-sub); text-align: center;
+}
+.sched-route-week {
+  font-size: 0.65rem; padding: 0.15rem 0.3rem; margin-top: 0.2rem;
+}
+
+/* RIGHT: day columns scroll horizontally */
+.sched-pilot-row .sched-cols {
+  display: flex; flex: 1; overflow-x: auto; overflow-y: visible; min-height: 0;
+}
+
+/* Pool: wider on desktop, taller on mobile */
+.sched-pool {
+  width: 220px; flex-shrink: 0; border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; background: var(--bg2); overflow: hidden;
+}
+
 @media (max-width: 700px) {
-  .sched-week-header { padding-left: 0; flex-wrap: nowrap; overflow-x: auto; }
-  .sched-week-day-lbl { min-width: 90px; }
-  .sched-pilot-row-header, .sched-pilot-row-unassigned { font-size: 0.75rem; padding: 0.25rem 0.4rem; }
+  .sched-pool { width: 100%; height: auto; max-height: 280px; border-right: none; border-bottom: 1px solid var(--border); }
+  .sched-pool-list { display: flex; flex-direction: row; overflow-x: auto; overflow-y: visible; padding: 0.3rem; }
+  .sched-pool-card { min-width: 180px; max-width: 220px; margin-right: 0.35rem; margin-bottom: 0; flex-shrink: 0; }
+  .sched-week-header { margin-left: 70px; }
+  .sched-pilot-label { width: 70px; }
+  .sched-week-day-lbl { min-width: 100px; }
 }
 
