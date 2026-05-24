@@ -1121,7 +1121,10 @@ body.light .leaflet-container { background: #e8e8e8; }
 .sched-card-prods {
   font-size: 0.68rem; color: var(--text-sub); margin-top: 4px;
   border-top: 1px solid var(--border); padding-top: 4px; line-height: 1.6;
-  word-break: break-word; white-space: normal; overflow: hidden;
+  word-break: break-word; white-space: normal;
+}
+.sched-prod-row {
+  display: block; width: 100%;
 }
 .sched-prod-rate { color: var(--text-sub); opacity: 0.7; }
 
@@ -1142,12 +1145,67 @@ body.light .leaflet-container { background: #e8e8e8; }
 .sched-pilot-assign-btn:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
 
 /* Card overflow — force wrap on all text within cards */
-.sched-pool-card *, .sched-day-card * {
+/* Card children: constrain block elements but not inline spans */
+.sched-card-prods, .sched-card-meta, .sched-suggest-label,
+.sched-card-sub, .sched-card-top, .sched-card-actions, .sched-prod-row {
   max-width: 100%;
   box-sizing: border-box;
 }
 .sched-suggest-label {
   font-size: 0.68rem; color: var(--accent2); margin-top: 2px; font-weight: 500;
-  white-space: normal; word-break: break-word; overflow: hidden;
+  white-space: normal; word-break: break-word;
+}
+
+/* ── SMART SCHEDULE v4.7 — per-pilot stacked rows ─────────────────────────── */
+
+/* Toolbar toggle button */
+.sched-toggle-btn {
+  padding: 0.25rem 0.65rem; border-radius: 99px; font-size: 0.78rem; font-weight: 500;
+  border: 1px solid var(--border); background: transparent; color: var(--text-sub);
+  cursor: pointer; transition: all 0.15s;
+}
+.sched-toggle-btn.active { background: var(--bg3); color: var(--text); border-color: var(--accent); }
+
+/* Week header row — date labels above all pilot rows */
+.sched-week-header {
+  display: flex; padding-left: 130px; border-bottom: 1px solid var(--border);
+  background: var(--bg2); flex-shrink: 0;
+}
+.sched-week-day-lbl {
+  flex: 1; min-width: 110px; font-size: 0.75rem; font-weight: 600;
+  padding: 0.3rem 0.5rem; color: var(--text-sub); border-right: 1px solid var(--border);
+}
+.sched-week-day-lbl:last-child { border-right: none; }
+.sched-week-day-lbl.sched-today-label { color: var(--accent); }
+
+/* Pilot rows container */
+.sched-pilot-rows { flex: 1; overflow-y: auto; }
+
+/* One pilot section */
+.sched-pilot-row { display: flex; flex-direction: column; border-bottom: 2px solid var(--border); }
+
+/* Pilot section header */
+.sched-pilot-row-header, .sched-pilot-row-unassigned {
+  display: flex; align-items: center; padding: 0.35rem 0.5rem;
+  font-size: 0.8rem; font-weight: 600; background: var(--bg2);
+  border-bottom: 1px solid var(--border); min-width: 0; gap: 0.5rem;
+}
+.sched-pilot-row-unassigned { color: var(--text-sub); font-weight: 400; font-style: italic; }
+.sched-pilot-row-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Day columns inside each pilot row */
+.sched-pilot-row .sched-cols {
+  display: flex; overflow-x: auto; min-height: 80px;
+}
+
+/* Adjust grid to not use old height:100% chain */
+.sched-grid {
+  flex: 1; overflow: hidden; display: flex; flex-direction: column; min-height: 0;
+}
+
+@media (max-width: 700px) {
+  .sched-week-header { padding-left: 0; flex-wrap: nowrap; overflow-x: auto; }
+  .sched-week-day-lbl { min-width: 90px; }
+  .sched-pilot-row-header, .sched-pilot-row-unassigned { font-size: 0.75rem; padding: 0.25rem 0.4rem; }
 }
 

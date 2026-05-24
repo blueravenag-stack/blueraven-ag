@@ -229,7 +229,7 @@ window.GDUCalc = (() => {
   // ── MAIN ENTRY: analyzeOrder ───────────────────────────────────────────────
   // Returns full GDU analysis for one corn order
 
-  async function analyzeOrder(order, field) {
+  async function analyzeOrder(order, field, fetchFn) {
     const rm          = parseFloat(order.RelativeMaturity);
     const plantDate   = order.PlantingDate;
 
@@ -247,7 +247,9 @@ window.GDUCalc = (() => {
 
     try {
       // Fetch weather from planting through seasonal forecast (6 months out)
-      const temps = await fetchWeather(lat, lng, plantDate, fcstEnd);
+      const temps = fetchFn
+        ? await fetchFn(lat, lng, plantDate, fcstEnd)
+        : await fetchWeather(lat, lng, plantDate, fcstEnd);
 
       // Mark forecast days
       temps.forEach(d => { d.isForecast = d.date > today; });
@@ -357,6 +359,6 @@ window.GDUCalc = (() => {
   }
 
   // ── PUBLIC ────────────────────────────────────────────────────────────────
-  return { analyzeOrder, calcDailyGDU, calcCumulativeGDU, fungicideWindow, fmtDate, urgencyClass, addDays };
+  return { analyzeOrder, fetchWeatherPublic: fetchWeather, calcDailyGDU, calcCumulativeGDU, fungicideWindow, fmtDate, urgencyClass, addDays };
 
 })();

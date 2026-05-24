@@ -2569,14 +2569,14 @@ function renderGDUCard(r) {
     <div class="gdu-window-row">
       <div class="gdu-window-item">
         <span class="gdu-window-lbl">Window opens (VT)</span>
-        <span class="gdu-window-val">${GDUCalc.fmtDate(r.windowStart)}</span>
+        <span class="gdu-window-val">${GDUCalc.fmtDate(r.vtDate)}</span>
       </div>
       <div class="gdu-window-item target">
         <span class="gdu-window-lbl">🎯 Peak (VT-R1)</span>
         <span class="gdu-window-val">${GDUCalc.fmtDate(r.targetDate)}${r.targetProjected ? ' *' : ''}</span>
       </div>
       <div class="gdu-window-item">
-        <span class="gdu-window-lbl">Window closes (R1)</span>
+        <span class="gdu-window-lbl">Window closes (R2)</span>
         <span class="gdu-window-val">${GDUCalc.fmtDate(r.windowEnd)}</span>
       </div>
     </div>
@@ -2721,7 +2721,7 @@ function emailGDUSummary(orderId) {
     `Stage: ${r.stage}`,
     ``,
     `Fungicide Window:`,
-    `  Opens (VT):  ${GDUCalc.fmtDate(r.windowStart)}`,
+    `  Opens (VT):  ${GDUCalc.fmtDate(r.vtDate)}`,
     `  Peak target: ${GDUCalc.fmtDate(r.targetDate)}${r.targetProjected ? ' (projected)' : ''}`,
     `  Closes (R1): ${GDUCalc.fmtDate(r.windowEnd)}`,
     ``,
@@ -2747,14 +2747,14 @@ function renderGDUTimeline() {
     return;
   }
 
-  const validResults = gduResults.filter(r => !r.error && r.windowStart && r.windowEnd);
+  const validResults = gduResults.filter(r => !r.error && r.vtDate && r.windowEnd);
   if (!validResults.length) {
     container.innerHTML = '<div class="empty-state">No valid results to display.</div>';
     return;
   }
 
   // Determine timeline date bounds: earliest windowStart to latest windowEnd
-  const allDates = validResults.flatMap(r => [r.windowStart, r.windowEnd, r.targetDate].filter(Boolean));
+  const allDates = validResults.flatMap(r => [r.vtDate, r.windowEnd, r.targetDate].filter(Boolean));
   const today = new Date().toISOString().split('T')[0];
   allDates.push(today);
   const minDate = allDates.reduce((a, b) => a < b ? a : b);
@@ -2784,7 +2784,7 @@ function renderGDUTimeline() {
     const order = DB.orders.find(o => o.OrderID === r.orderId);
     const schedDate = order?.ScheduledDate || '';
     const urgency = GDUCalc.urgencyClass(r);
-    const winLeft   = pct(r.windowStart).toFixed(1);
+    const winLeft   = pct(r.vtDate).toFixed(1);
     const winWidth  = (pct(r.windowEnd) - pct(r.windowStart)).toFixed(1);
     const targLeft  = pct(r.targetDate).toFixed(1);
     const todayLeft = pct(today).toFixed(1);
@@ -2852,13 +2852,27 @@ async function runGDUAnalysis() {
   );
 
   gduResults = [];
-  for (const o of cornOrders) {
-    // Get primary field for this order (for lat/lng)
+  // Deduplicate weather fetches by location (lat/lng rounded to 2dp ≈ 1km)
+  // and run all orders in parallel for speed
+  const weatherCache = {};
+  const fetchCached = async (lat, lng, plantDate, endDate) => {
+    const key = `${lat.toFixed(2)},${lng.toFixed(2)}`;
+    if (!weatherCache[key]) {
+      weatherCache[key] = GDUCalc.fetchWeatherPublic(lat, lng, plantDate, endDate);
+    }
+    return weatherCache[key];
+  };
+
+  const results = await Promise.allSettled(cornOrders.map(async o => {
     const orderField = DB.orderFields.find(f => f.OrderID === o.OrderID);
     const field = orderField ? DB.fields.find(f => f.FieldID === orderField.FieldID) : null;
-    const result = await GDUCalc.analyzeOrder(o, field);
-    gduResults.push(result);
-  }
+    return GDUCalc.analyzeOrder(o, field, fetchCached);
+  }));
+
+  results.forEach(r => {
+    if (r.status === 'fulfilled') gduResults.push(r.value);
+    else gduResults.push({ error: r.reason?.message || 'Analysis failed', orderId: '' });
+  });
 
   // Sort by urgency (highest pctToTarget first)
   gduResults.sort((a, b) => (b.pctToVT || 0) - (a.pctToVT || 0));
@@ -3722,10 +3736,12 @@ function showToast(msg, type) {
 
 let scheduleState = {
   weekStart:    null,   // Monday of displayed week (YYYY-MM-DD)
-  activePilot:  '',     // '' = show all pilots
+  activePilot:  '',     // '' = show all pilots (kept for detail/route compat)
   showAll:      false,  // include orders that already have a date
+  showProducts: true,   // toggle product list on cards
   dragging:     null,   // { orderId, fromDay } during drag
   dayDetail:    null,   // date string currently shown in map panel
+  detailPilot:  null,   // pilot filter for detail map
   detailMap:    null,   // Leaflet map instance for day detail
 };
 
@@ -3859,7 +3875,7 @@ function buildSchedCardBody(o, { compact = false } = {}) {
   const fieldNames= oFields.map(f => f.FieldName).join(', ') || '—';
   const ac        = parseFloat(o.TotalAcres || 0);
   const pricing   = o.PricingType === 'Flat Rate + Chemical' ? 'Flat+Chem' : 'Flat Rate';
-  const prodList  = oProds.map(p => `${p.ProductName} <span class="sched-prod-rate">${p.RatePerAcre} ${p.Unit}/ac</span>`).join('<br>');
+  const prodList  = oProds.map(p => `<div class="sched-prod-row">${p.ProductName} <span class="sched-prod-rate">${p.RatePerAcre} ${p.Unit}/ac</span></div>`).join('');
 
   let html = `
     <div class="sched-card-top">
@@ -3877,13 +3893,13 @@ function buildSchedCardBody(o, { compact = false } = {}) {
     ].filter(Boolean).join(' · ');
     if (meta) html += `<div class="sched-card-meta">${meta}</div>`;
 
-    // GDU window
-    if (gr && gr.windowStart) {
-      html += `<div class="sched-suggest-label">Window: ${fmtDate(gr.windowStart)} – ${fmtDate(gr.windowEnd)} · Target: ${fmtDate(gr.targetDate)}</div>`;
+    // GDU window — vtDate is true VT (100%), windowEnd is R2 cutoff
+    if (gr && gr.vtDate) {
+      html += `<div class="sched-suggest-label">VT: ${fmtDate(gr.vtDate)} → R2: ${fmtDate(gr.windowEnd)}</div>`;
     }
 
-    // Products
-    if (oProds.length) {
+    // Products (toggled by scheduleState.showProducts)
+    if (oProds.length && scheduleState.showProducts) {
       html += `<div class="sched-card-prods">${prodList}</div>`;
     }
   }
@@ -3895,31 +3911,36 @@ function renderSchedule() {
   const el = document.getElementById('scheduleContent');
   if (!el) return;
 
-  if (!scheduleState.weekStart) {
-    scheduleState.weekStart = schedMonday(null);
-  }
+  if (!scheduleState.weekStart) scheduleState.weekStart = schedMonday(null);
 
-  const weekDates  = schedWeekDates(scheduleState.weekStart);
-  const pilots     = DB.pilots.filter(p => p.Active === 'Yes');
-  const activePilot = scheduleState.activePilot;
+  const weekDates = schedWeekDates(scheduleState.weekStart);
+  const pilots    = DB.pilots.filter(p => p.Active === 'Yes');
+  const today     = new Date().toISOString().split('T')[0];
 
-  // Pool: orders without a ScheduledDate (or all if showAll)
+  // ── Pool orders ──────────────────────────────────────────────────────────
   const poolOrders = DB.orders.filter(o => {
     if (!['Open','Scheduled'].includes(o.Status)) return false;
     if (!scheduleState.showAll && o.ScheduledDate) return false;
-    if (activePilot && o.PilotID && o.PilotID !== activePilot) return false;
     return true;
   }).sort((a, b) => {
-    // Sort by GDU urgency first, then customer name
     const ga = gduResults.find(r => r.orderId === a.OrderID);
     const gb = gduResults.find(r => r.orderId === b.OrderID);
-    const ua = ga ? (ga.pctToTarget || 0) : 0;
-    const ub = gb ? (gb.pctToTarget || 0) : 0;
-    if (ub !== ua) return ub - ua;
+    const vtA = ga?.vtDate || '9999-99-99';
+    const vtB = gb?.vtDate || '9999-99-99';
+    if (vtA !== vtB) return vtA.localeCompare(vtB);
+    if (AppSettings.homeBaseLat && AppSettings.homeBaseLng) {
+      const home = { lat: parseFloat(AppSettings.homeBaseLat), lng: parseFloat(AppSettings.homeBaseLng) };
+      const getPos = o => {
+        const of = DB.orderFields.find(f => f.OrderID === o.OrderID);
+        const f  = of ? DB.fields.find(x => x.FieldID === of.FieldID) : null;
+        return f?.CentroidLat ? { lat: parseFloat(f.CentroidLat), lng: parseFloat(f.CentroidLng) } : null;
+      };
+      const posA = getPos(a), posB = getPos(b);
+      if (posA && posB) return GeoUtils.haversineKm(home, posA) - GeoUtils.haversineKm(home, posB);
+    }
     return (a.CustomerName || '').localeCompare(b.CustomerName || '');
   });
 
-  // Pool HTML
   const poolHtml = poolOrders.length === 0
     ? '<div class="sched-pool-empty">All orders scheduled</div>'
     : poolOrders.map(o => {
@@ -3934,77 +3955,86 @@ function renderSchedule() {
         </div>`;
       }).join('');
 
-  // Week grid columns
-  const colsHtml = weekDates.map(date => {
-    let dayOrders = DB.orders.filter(o => o.ScheduledDate === date &&
-      (!activePilot || o.PilotID === activePilot) &&
-      ['Open','Scheduled','Completed'].includes(o.Status));
+  // ── Build one pilot section per pilot + unassigned ───────────────────────
+  function buildPilotSection(pilotId, pilotName, target) {
+    const isUnassigned = !pilotId;
+    const dayColsHtml = weekDates.map(date => {
+      let dayOrders = DB.orders.filter(o =>
+        o.ScheduledDate === date &&
+        (isUnassigned ? !o.PilotID : o.PilotID === pilotId) &&
+        ['Open','Scheduled','Completed'].includes(o.Status)
+      );
+      const routeOrder = getScheduleOrder(date, pilotId);
+      if (routeOrder) {
+        dayOrders = [
+          ...routeOrder.map(id => dayOrders.find(o => o.OrderID === id)).filter(Boolean),
+          ...dayOrders.filter(o => !routeOrder.includes(o.OrderID))
+        ];
+      }
+      const totalAc  = dayOrders.reduce((s, o) => s + parseFloat(o.TotalAcres || 0), 0);
+      const pct      = target ? Math.min(100, (totalAc / target) * 100) : 0;
+      const barColor = pct >= 100 ? 'var(--danger)' : pct >= 80 ? 'var(--warn)' : 'var(--accent2)';
+      const isToday  = date === today;
+      const isActive = scheduleState.dayDetail === date && scheduleState.detailPilot === (pilotId||'');
 
-    // Apply stored route order if present
-    const routeOrder = getScheduleOrder(date, activePilot);
-    if (routeOrder) {
-      dayOrders = [
-        ...routeOrder.map(id => dayOrders.find(o => o.OrderID === id)).filter(Boolean),
-        ...dayOrders.filter(o => !routeOrder.includes(o.OrderID))
-      ];
-    }
+      const cardsHtml = dayOrders.map(o => {
+        const isDone = o.Status === 'Completed';
+        return `<div class="sched-day-card ${isDone ? 'sched-done' : ''}"
+            draggable="true"
+            data-order-id="${o.OrderID}"
+            ondragstart="schedDragStart(event,'${o.OrderID}','${date}')"
+            ondragend="schedDragEnd(event)"
+            onclick="event.stopPropagation();viewOrder('${o.OrderID}')">
+          ${buildSchedCardBody(o, { compact: false })}
+          <div class="sched-card-actions">
+            <button class="sched-move-btn" onclick="schedMoveCard('${date}','${o.OrderID}',-1,event)" title="Move up">▲</button>
+            <button class="sched-move-btn" onclick="schedMoveCard('${date}','${o.OrderID}',1,event)" title="Move down">▼</button>
+            <span style="flex:1"></span>
+            <button class="sched-unassign-btn" onclick="schedUnassign('${o.OrderID}',event)" title="Return to pool">✕</button>
+          </div>
+        </div>`;
+      }).join('');
 
-    const totalAc = dayOrders.reduce((s, o) => s + parseFloat(o.TotalAcres || 0), 0);
-    const target  = activePilot
-      ? (AppSettings.pilotTargets?.[activePilot] || AppSettings.defaultDailyAcres || 200)
-      : (AppSettings.defaultDailyAcres || 200);
-    const pct     = Math.min(100, (totalAc / target) * 100);
-    const barColor= pct >= 100 ? 'var(--danger)' : pct >= 80 ? 'var(--warn)' : 'var(--accent2)';
-    const isToday = date === new Date().toISOString().split('T')[0];
-    const isActive = scheduleState.dayDetail === date;
-
-    const cardsHtml = dayOrders.map(o => {
-      const of = DB.orderFields.filter(f => f.OrderID === o.OrderID);
-      const gr = gduResults.find(r => r.orderId === o.OrderID);
-      const urg = gr ? GDUCalc.urgencyClass(gr) : '';
-      const urgDot = urg ? `<span class="sched-urg-dot sched-urg-${urg}"></span>` : '';
-      const statusDot = o.Status === 'Completed' ? '✓ ' : '';
-      const isDone = o.Status === 'Completed';
-      return `<div class="sched-day-card ${isDone ? 'sched-done' : ''}"
-          draggable="true"
-          data-order-id="${o.OrderID}"
-          ondragstart="schedDragStart(event,'${o.OrderID}','${date}')"
-          ondragend="schedDragEnd(event)"
-          onclick="event.stopPropagation();viewOrder('${o.OrderID}')">
-        ${buildSchedCardBody(o, { compact: false })}
-        <div class="sched-card-actions">
-          <button class="sched-move-btn" onclick="schedMoveCard('${date}','${o.OrderID}',-1,event)" title="Move up">▲</button>
-          <button class="sched-move-btn" onclick="schedMoveCard('${date}','${o.OrderID}',1,event)" title="Move down">▼</button>
-          ${o.PilotName && !activePilot ? `<span style="font-size:0.68rem;color:var(--text-sub);flex:1">${o.PilotName}</span>` : '<span style="flex:1"></span>'}
-          <button class="sched-unassign-btn" onclick="schedUnassign('${o.OrderID}',event)" title="Return to pool">✕</button>
+      const tapTarget = _schedSelected && !isUnassigned ? 'sched-tap-target' : '';
+      return `<div class="sched-day-col ${isToday ? 'sched-today' : ''} ${isActive ? 'sched-day-active' : ''} ${tapTarget}"
+          data-date="${date}" data-pilot="${pilotId||''}"
+          ondragover="event.preventDefault();event.currentTarget.classList.add('sched-drop-target')"
+          ondragleave="event.currentTarget.classList.remove('sched-drop-target')"
+          ondrop="schedDrop(event,'${date}','${pilotId||''}')"
+          onclick="schedTapDay('${date}','${pilotId||''}')">
+        <div class="sched-day-header">
+          <span class="sched-day-label ${isToday ? 'sched-today-label' : ''}">${schedFmtDay(date)}</span>
+          <span class="sched-day-acres">${totalAc.toFixed(0)}${target ? '/' + target : ''} ac</span>
         </div>
+        ${target ? `<div class="sched-acre-bar"><div class="sched-acre-fill" style="width:${pct}%;background:${barColor}"></div></div>` : ''}
+        <div class="sched-day-cards">${cardsHtml}</div>
+        ${!isUnassigned ? `<div class="sched-day-footer">
+          <button class="sched-route-btn" onclick="event.stopPropagation();autoRouteDay('${date}','${pilotId}')" title="Auto-route by distance">⇌ Route</button>
+        </div>` : ''}
       </div>`;
     }).join('');
 
-    const isTapTarget = !!_schedSelected;
-    return `<div class="sched-day-col ${isToday ? 'sched-today' : ''} ${isActive ? 'sched-day-active' : ''} ${isTapTarget ? 'sched-tap-target' : ''}"
-        data-date="${date}"
-        ondragover="event.preventDefault();event.currentTarget.classList.add('sched-drop-target')"
-        ondragleave="event.currentTarget.classList.remove('sched-drop-target')"
-        ondrop="schedDrop(event,'${date}')"
-        onclick="schedTapDay('${date}')">
-      <div class="sched-day-header">
-        <span class="sched-day-label ${isToday ? 'sched-today-label' : ''}">${schedFmtDay(date)}</span>
-        <span class="sched-day-acres">${totalAc.toFixed(1)} / ${target} ac</span>
+    const sectionTarget = target ? ` — target ${target} ac/day` : '';
+    const headerClass   = isUnassigned ? 'sched-pilot-row-unassigned' : 'sched-pilot-row-header';
+    return `<div class="sched-pilot-row">
+      <div class="${headerClass}">
+        <span class="sched-pilot-row-name">${pilotName}${sectionTarget}</span>
+        ${!isUnassigned ? `<button class="sched-route-btn" style="margin-left:auto"
+          onclick="autoRouteWeek('${pilotId}')"
+          title="Auto-route all days this week">⇌ Week</button>` : ''}
       </div>
-      <div class="sched-acre-bar"><div class="sched-acre-fill" style="width:${pct}%;background:${barColor}"></div></div>
-      <div class="sched-day-cards">${cardsHtml}</div>
-      <div class="sched-day-footer">
-        <button class="sched-route-btn" onclick="event.stopPropagation();autoRouteDay('${date}','${activePilot}')" title="Auto-route by distance">⇌ Route</button>
-      </div>
+      <div class="sched-cols">${dayColsHtml}</div>
     </div>`;
-  }).join('');
+  }
 
-  // Pilot filter pills
-  const pillsHtml = [{ PilotID: '', Name: 'All Pilots' }, ...pilots].map(p =>
-    `<button class="sched-pilot-pill ${scheduleState.activePilot === p.PilotID ? 'active' : ''}"
-      onclick="scheduleState.activePilot='${p.PilotID}';renderSchedule()">${p.Name}</button>`
-  ).join('');
+  // Build sections for each pilot + unassigned
+  const pilotSections = [
+    ...pilots.map(p => buildPilotSection(
+      p.PilotID, p.Name,
+      AppSettings.pilotTargets?.[p.PilotID] || AppSettings.defaultDailyAcres || 200
+    )),
+    buildPilotSection('', 'Unassigned', 0)
+  ].join('');
 
   el.innerHTML = `
     <div class="sched-toolbar">
@@ -4014,45 +4044,41 @@ function renderSchedule() {
         <button class="btn-ghost sched-nav-btn" onclick="schedChangeWeek(1)">Next ›</button>
         <button class="btn-ghost sched-nav-btn" onclick="scheduleState.weekStart=schedMonday(null);renderSchedule()">Today</button>
       </div>
-      <div class="sched-pilots">${pillsHtml}</div>
       <label class="sched-showall-label">
         <input type="checkbox" ${scheduleState.showAll ? 'checked' : ''} onchange="scheduleState.showAll=this.checked;renderSchedule()">
-        Show scheduled in pool
+        Scheduled in pool
       </label>
+      <button class="sched-toggle-btn ${scheduleState.showProducts ? 'active' : ''}"
+        onclick="scheduleState.showProducts=!scheduleState.showProducts;renderSchedule()">
+        ${scheduleState.showProducts ? '🧪 Hide Products' : '🧪 Show Products'}
+      </button>
     </div>
     <div class="sched-body">
       <div class="sched-pool">
         <div class="sched-pool-header">
           Unscheduled <span class="sched-pool-count">${poolOrders.length}</span>
-          <div class="sched-instructions">${
-            !_schedSelected ? (poolOrders.length ? 'Tap a card, then tap a day' : '') :
-            !_schedAssignPilot ? '👇 Select a pilot below' :
-            '👆 Now tap a day to assign'
-          }</div>
+          <div class="sched-instructions">${_schedSelected ? '👆 Tap a day in a pilot row' : 'Tap a card to select'}</div>
           ${!AppSettings.homeBaseLat ? '<div class="sched-warn">⚠ Set home base in Settings for auto-route</div>' : ''}
-        </div>
-        <div id="schedPilotPicker" style="display:${_schedSelected && !scheduleState.activePilot ? 'block' : 'none'};padding:0.4rem 0.5rem;border-bottom:1px solid var(--border);background:var(--bg2)">
-          <div style="font-size:0.7rem;color:var(--text-sub);margin-bottom:0.3rem;font-weight:600;text-transform:uppercase;letter-spacing:0.05em">Assign to pilot:</div>
-          <div style="display:flex;flex-wrap:wrap;gap:0.3rem">
-            ${pilots.map(p => `<button class="sched-pilot-assign-btn ${_schedAssignPilot===p.PilotID?'active':''}"
-              data-pilot-id="${p.PilotID}"
-              onclick="schedPickPilot('${p.PilotID}')">${p.Name}</button>`).join('')}
-          </div>
         </div>
         <div class="sched-pool-list">${poolHtml}</div>
       </div>
       <div class="sched-grid">
-        <div class="sched-cols">${colsHtml}</div>
+        <div class="sched-week-header">
+          ${weekDates.map(d => `<div class="sched-week-day-lbl ${d === today ? 'sched-today-label' : ''}">${schedFmtDay(d)}</div>`).join('')}
+        </div>
+        <div class="sched-pilot-rows">${pilotSections}</div>
       </div>
       <div class="sched-detail" id="schedDetail">
         <div class="sched-detail-placeholder">Click a day to see field map</div>
       </div>
     </div>`;
 
-  // Render detail map if a day is selected
-  if (scheduleState.dayDetail) {
-    schedRenderDetail(scheduleState.dayDetail);
-  }
+  if (scheduleState.dayDetail) schedRenderDetail(scheduleState.dayDetail);
+}
+
+function autoRouteWeek(pilotId) {
+  const weekDates = schedWeekDates(scheduleState.weekStart);
+  weekDates.forEach(d => autoRouteDay(d, pilotId));
 }
 
 function schedChangeWeek(dir) {
@@ -4206,67 +4232,38 @@ let _schedSelected     = null; // orderId currently tapped/selected in pool
 let _schedAssignPilot  = null; // pilot to assign on next tap-day (required)
 
 function schedSelectCard(orderId) {
-  if (_schedSelected === orderId) {
-    // Deselect
-    _schedSelected    = null;
-    _schedAssignPilot = null;
-  } else {
-    _schedSelected    = orderId;
-    _schedAssignPilot = null; // reset pilot selection when new card selected
-    // Auto-set pilot if filter is already active
-    if (scheduleState.activePilot) {
-      _schedAssignPilot = scheduleState.activePilot;
-    }
-  }
-  // Update card highlights without scroll jump
+  _schedSelected    = _schedSelected === orderId ? null : orderId;
+  _schedAssignPilot = null;
+  // Update pool card highlights without scroll jump
   document.querySelectorAll('.sched-pool-card').forEach(el => {
     el.classList.toggle('sched-pool-selected', el.dataset.orderId === _schedSelected);
   });
+  // Highlight all day columns as tap targets when a card is selected
   document.querySelectorAll('.sched-day-col').forEach(el => {
-    el.classList.toggle('sched-tap-target', !!(_schedSelected && _schedAssignPilot));
+    el.classList.toggle('sched-tap-target', !!_schedSelected);
   });
-  // Show/hide pilot picker
-  const picker = document.getElementById('schedPilotPicker');
-  if (picker) {
-    picker.style.display = (_schedSelected && !scheduleState.activePilot) ? 'block' : 'none';
-  }
   // Update instructions
   const instrEl = document.querySelector('.sched-instructions');
-  if (instrEl) {
-    if (!_schedSelected) instrEl.textContent = 'Tap a card, then tap a day';
-    else if (!_schedAssignPilot) instrEl.textContent = '👇 Select a pilot below';
-    else instrEl.textContent = '👆 Now tap a day to assign';
-  }
+  if (instrEl) instrEl.textContent = _schedSelected ? '👆 Tap a day in a pilot row' : 'Tap a card to select';
 }
 
-function schedPickPilot(pilotId) {
-  _schedAssignPilot = pilotId;
-  // Highlight selected pilot button
-  document.querySelectorAll('.sched-pilot-assign-btn').forEach(el => {
-    el.classList.toggle('active', el.dataset.pilotId === pilotId);
-  });
-  // Enable day columns now that pilot is chosen
-  document.querySelectorAll('.sched-day-col').forEach(el => {
-    el.classList.toggle('sched-tap-target', true);
-  });
-  const instrEl = document.querySelector('.sched-instructions');
-  if (instrEl) instrEl.textContent = '👆 Now tap a day to assign';
-}
-
-function schedTapDay(date) {
+function schedTapDay(date, pilotId) {
   if (_schedSelected) {
-    if (!_schedAssignPilot) {
-      showToast('Select a pilot first', 'error');
+    // pilotId comes from which pilot row was tapped
+    const assignPilot = pilotId || _schedAssignPilot;
+    if (!assignPilot) {
+      showToast('Tap a day in a pilot row to assign', 'error');
       return;
     }
-    schedAssign(_schedSelected, date, _schedAssignPilot);
+    schedAssign(_schedSelected, date, assignPilot);
     _schedSelected    = null;
     _schedAssignPilot = null;
-    // Hide pilot picker
-    const picker = document.getElementById('schedPilotPicker');
-    if (picker) picker.style.display = 'none';
   } else {
-    schedSelectDay(date);
+    // Open detail map for this date/pilot
+    scheduleState.dayDetail = (scheduleState.dayDetail === date && scheduleState.detailPilot === (pilotId||'')) ? null : date;
+    scheduleState.detailPilot = pilotId || '';
+    scheduleState.activePilot = pilotId || '';
+    schedRenderDetail(scheduleState.dayDetail);
   }
 }
 
@@ -4284,14 +4281,14 @@ function schedDragEnd(event) {
   scheduleState.dragging = null;
 }
 
-function schedDrop(event, toDay) {
+function schedDrop(event, toDay, pilotId) {
   event.preventDefault();
   event.currentTarget.classList.remove('sched-drop-target');
   const orderId = event.dataTransfer.getData('text/plain');
   if (!orderId) return;
-  const pilotId = scheduleState.activePilot || _schedAssignPilot || '';
+  // pilotId comes from which pilot row column was dropped into
   if (!pilotId) {
-    showToast('Select a pilot filter first to use drag-and-drop', 'error');
+    showToast('Drop into a pilot row to assign', 'error');
     return;
   }
   schedAssign(orderId, toDay, pilotId);
