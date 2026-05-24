@@ -1117,3 +1117,17 @@ body.light .leaflet-container { background: #e8e8e8; }
   font-size: 0.68rem; color: var(--text-sub); margin-top: 2px;
 }
 
+/* Shared order card — product list */
+.sched-card-prods {
+  font-size: 0.68rem; color: var(--text-sub); margin-top: 4px;
+  border-top: 1px solid var(--border); padding-top: 4px; line-height: 1.6;
+}
+.sched-prod-rate { color: var(--text-sub); opacity: 0.7; }
+
+/* Pricing type tag */
+.sched-pricing-tag {
+  display: inline-block; font-size: 0.65rem; font-weight: 500;
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: 99px; padding: 0 5px; white-space: nowrap;
+}
+

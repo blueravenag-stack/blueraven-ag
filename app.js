@@ -2292,8 +2292,16 @@ function printPilotSheet() {
     const pilotCert = pilotRec?.FAA_Part107_Num || '';
 
     Object.keys(pilotDayMap[pid]).sort().forEach(date => {
-      const dayOrders = pilotDayMap[pid][date];
-      let totalAcres  = 0;
+      // Apply schedule order set in smart scheduler (stored in localStorage)
+      let dayOrders = pilotDayMap[pid][date];
+      const routeOrder = getScheduleOrder(date, pid);
+      if (routeOrder) {
+        dayOrders = [
+          ...routeOrder.map(id => dayOrders.find(o => o.OrderID === id)).filter(Boolean),
+          ...dayOrders.filter(o => !routeOrder.includes(o.OrderID))
+        ];
+      }
+      let totalAcres = 0;
       const rows = dayOrders.map((o, idx) => {
         const oFields  = DB.orderFields.filter(f => f.OrderID === o.OrderID);
         const oProds   = DB.orderProds.filter(p => p.OrderID === o.OrderID);
@@ -3801,6 +3809,49 @@ async function schedAssign(orderId, newDate, newPilotId) {
 }
 
 // ── MAIN RENDER ───────────────────────────────────────────────────────────────
+
+// ── SHARED ORDER CARD BUILDER ─────────────────────────────────────────────────
+function buildSchedCardBody(o, { compact = false } = {}) {
+  const oFields   = DB.orderFields.filter(f => f.OrderID === o.OrderID);
+  const oProds    = DB.orderProds.filter(p => p.OrderID === o.OrderID);
+  const gr        = gduResults.find(r => r.orderId === o.OrderID);
+  const urg       = gr ? GDUCalc.urgencyClass(gr) : '';
+  const urgDot    = urg ? `<span class="sched-urg-dot sched-urg-${urg}" title="${urg}"></span>` : '';
+  const fieldNames= oFields.map(f => f.FieldName).join(', ') || '—';
+  const ac        = parseFloat(o.TotalAcres || 0);
+  const pricing   = o.PricingType === 'Flat Rate + Chemical' ? 'Flat+Chem' : 'Flat Rate';
+  const prodList  = oProds.map(p => `${p.ProductName} <span class="sched-prod-rate">${p.RatePerAcre} ${p.Unit}/ac</span>`).join('<br>');
+
+  let html = `
+    <div class="sched-card-top">
+      ${urgDot}
+      <span class="sched-card-field">${fieldNames}</span>
+      <span class="sched-card-acres">${ac.toFixed(1)} ac</span>
+    </div>
+    <div class="sched-card-sub">${o.CustomerName} · ${o.CropType || '—'} · <span class="sched-pricing-tag">${pricing}</span></div>`;
+
+  if (!compact) {
+    // Planting + RM
+    const meta = [
+      o.PlantingDate     ? 'Planted ' + fmtDate(o.PlantingDate) : '',
+      o.RelativeMaturity ? 'RM ' + o.RelativeMaturity : ''
+    ].filter(Boolean).join(' · ');
+    if (meta) html += `<div class="sched-card-meta">${meta}</div>`;
+
+    // GDU window
+    if (gr && gr.windowStart) {
+      html += `<div class="sched-suggest-label">Window: ${fmtDate(gr.windowStart)} – ${fmtDate(gr.windowEnd)} · Target: ${fmtDate(gr.targetDate)}</div>`;
+    }
+
+    // Products
+    if (oProds.length) {
+      html += `<div class="sched-card-prods">${prodList}</div>`;
+    }
+  }
+
+  return html;
+}
+
 function renderSchedule() {
   const el = document.getElementById('scheduleContent');
   if (!el) return;
@@ -3833,35 +3884,14 @@ function renderSchedule() {
   const poolHtml = poolOrders.length === 0
     ? '<div class="sched-pool-empty">All orders scheduled</div>'
     : poolOrders.map(o => {
-        const of  = DB.orderFields.filter(f => f.OrderID === o.OrderID);
-        const gr  = gduResults.find(r => r.orderId === o.OrderID);
-        const urg = gr ? GDUCalc.urgencyClass(gr) : '';
-        const urgDot = urg ? `<span class="sched-urg-dot sched-urg-${urg}" title="${urg}"></span>` : '';
-        const fieldLabel = of.map(f => f.FieldName).join(', ') || '—';
-        const pilotLabel = o.PilotName ? `<span class="sched-chip">${o.PilotName}</span>` : '';
         const isSelected = _schedSelected === o.OrderID;
-        const gr2 = gduResults.find(r => r.orderId === o.OrderID);
-        const suggestDate = gr2?.targetDate || '';
-        const suggestLabel = suggestDate ? 'GDU target: ' + schedFmtDay(suggestDate) : '';
         return `<div class="sched-pool-card ${isSelected ? 'sched-pool-selected' : ''}" draggable="true"
             data-order-id="${o.OrderID}"
             ondragstart="schedDragStart(event,'${o.OrderID}','')"
             ondragend="schedDragEnd(event)"
             onclick="schedSelectCard('${o.OrderID}')">
-          <div class="sched-card-top">
-            ${urgDot}
-            <span class="sched-card-field">${fieldLabel}</span>
-            <span class="sched-card-acres">${parseFloat(o.TotalAcres||0).toFixed(1)} ac</span>
-          </div>
-          <div class="sched-card-sub">${o.CustomerName} · ${o.CropType||'—'} ${pilotLabel}</div>
-          ${o.PlantingDate || o.RelativeMaturity ? `<div class="sched-card-meta">${[
-            o.PlantingDate ? 'Planted ' + fmtDate(o.PlantingDate) : '',
-            o.RelativeMaturity ? 'RM ' + o.RelativeMaturity : ''
-          ].filter(Boolean).join(' · ')}</div>` : ''}
-          ${gr2 ? `<div class="sched-suggest-label">${[
-            gr2.windowStart ? 'Window: ' + fmtDate(gr2.windowStart) + ' – ' + fmtDate(gr2.windowEnd) : '',
-            suggestLabel
-          ].filter(Boolean).join(' · ')}</div>` : ''}
+          ${buildSchedCardBody(o)}
+          ${o.PilotName ? `<span class="sched-chip">${o.PilotName}</span>` : ''}
         </div>`;
       }).join('');
 
@@ -3895,17 +3925,14 @@ function renderSchedule() {
       const urg = gr ? GDUCalc.urgencyClass(gr) : '';
       const urgDot = urg ? `<span class="sched-urg-dot sched-urg-${urg}"></span>` : '';
       const statusDot = o.Status === 'Completed' ? '✓ ' : '';
-      return `<div class="sched-day-card ${o.Status === 'Completed' ? 'sched-done' : ''}"
+      const isDone = o.Status === 'Completed';
+      return `<div class="sched-day-card ${isDone ? 'sched-done' : ''}"
           draggable="true"
           data-order-id="${o.OrderID}"
           ondragstart="schedDragStart(event,'${o.OrderID}','${date}')"
           ondragend="schedDragEnd(event)"
           onclick="event.stopPropagation();viewOrder('${o.OrderID}')">
-        <div class="sched-card-top">
-          ${urgDot}${statusDot}
-          <span class="sched-card-field" style="font-size:0.75rem">${of.map(f=>f.FieldName).join(', ')||'—'}</span>
-          <span class="sched-card-acres" style="font-size:0.72rem">${parseFloat(o.TotalAcres||0).toFixed(1)}ac</span>
-        </div>
+        ${buildSchedCardBody(o, { compact: false })}
         <div class="sched-card-actions">
           <button class="sched-move-btn" onclick="schedMoveCard('${date}','${o.OrderID}',-1,event)" title="Move up">▲</button>
           <button class="sched-move-btn" onclick="schedMoveCard('${date}','${o.OrderID}',1,event)" title="Move down">▼</button>
