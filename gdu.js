@@ -117,7 +117,9 @@ window.GDUCalc = (() => {
       `&daily=temperature_2m_max,temperature_2m_min` +
       `&temperature_unit=fahrenheit&timezone=America%2FChicago`;
     const res  = await fetch(url);
+    if (!res.ok) throw new Error(`Archive API HTTP ${res.status}`);
     const data = await res.json();
+    if (data.error) throw new Error(data.reason || 'Archive API error');
     return zipTemps(data);
   }
 
@@ -128,12 +130,12 @@ window.GDUCalc = (() => {
       `&temperature_unit=fahrenheit&timezone=America%2FChicago` +
       `&forecast_days=16`;
     const res  = await fetch(url);
+    if (!res.ok) throw new Error(`Forecast API HTTP ${res.status}`);
     const data = await res.json();
+    if (data.error) throw new Error(data.reason || 'Forecast API error');
     const all   = zipTemps(data);
     const today2= new Date().toISOString().split('T')[0];
-    // Mark future dates as forecast
     all.forEach(d => { d.isForecast = d.date > today2; });
-    // Filter to requested range
     return all.filter(d => d.date >= start && d.date <= end);
   }
 
@@ -254,8 +256,9 @@ window.GDUCalc = (() => {
       // Fungicide window
       const window = fungicideWindow(rm);
 
-      // Project target date using avg GDU if forecast doesn't reach it
-      const avgGDU = 14; // avg mid-June-July IL daily GDU
+      // Project target date using month-aware avg GDU (falls back automatically)
+      const lastDate   = withGDU.length ? withGDU[withGDU.length-1].date : new Date().toISOString().split('T')[0];
+      const avgGDU     = avgGDUForDate(lastDate);
 
       const targetResult   = projectToTarget(withGDU, window.target, avgGDU);
       const windowStart    = projectToTarget(withGDU, window.start,  avgGDU);

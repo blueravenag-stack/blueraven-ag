@@ -981,16 +981,16 @@ body.light .leaflet-container { background: #e8e8e8; }
   background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius);
   padding: 0.45rem 0.5rem; margin-bottom: 0.35rem; cursor: grab;
   transition: box-shadow 0.15s, opacity 0.15s;
-  user-select: none;
+  user-select: none; overflow: hidden; min-width: 0;
 }
 .sched-pool-card:hover, .sched-day-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.25); }
 .sched-pool-card.sched-dragging, .sched-day-card.sched-dragging { opacity: 0.4; }
 .sched-day-card { font-size: 0.78rem; }
 .sched-done { opacity: 0.55; }
 .sched-card-top { display: flex; align-items: baseline; gap: 4px; }
-.sched-card-field { flex: 1; font-weight: 500; font-size: 0.8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sched-card-field { flex: 1; font-weight: 500; font-size: 0.8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .sched-card-acres { font-size: 0.72rem; color: var(--text-sub); white-space: nowrap; flex-shrink: 0; }
-.sched-card-sub { font-size: 0.72rem; color: var(--text-sub); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sched-card-sub { font-size: 0.72rem; color: var(--text-sub); margin-top: 1px; white-space: normal; overflow: hidden; word-break: break-word; }
 .sched-chip { background: var(--bg2); border: 1px solid var(--border); border-radius: 99px; font-size: 0.68rem; padding: 0 5px; }
 
 /* GDU urgency dots */
@@ -1027,7 +1027,7 @@ body.light .leaflet-container { background: #e8e8e8; }
 .sched-acre-bar { height: 4px; background: var(--bg3); margin: 0 0.5rem 0.3rem; border-radius: 2px; flex-shrink: 0; }
 .sched-acre-fill { height: 100%; border-radius: 2px; transition: width 0.3s; }
 
-.sched-day-cards { flex: 1; overflow-y: auto; padding: 0.3rem 0.35rem; }
+.sched-day-cards { flex: 1; overflow-y: auto; padding: 0.3rem 0.35rem; min-width: 0; }
 .sched-day-footer { padding: 0.25rem 0.35rem; flex-shrink: 0; }
 .sched-route-btn {
   font-size: 0.7rem; padding: 0.2rem 0.4rem; border: 1px solid var(--border);
@@ -1121,6 +1121,7 @@ body.light .leaflet-container { background: #e8e8e8; }
 .sched-card-prods {
   font-size: 0.68rem; color: var(--text-sub); margin-top: 4px;
   border-top: 1px solid var(--border); padding-top: 4px; line-height: 1.6;
+  word-break: break-word; white-space: normal; overflow: hidden;
 }
 .sched-prod-rate { color: var(--text-sub); opacity: 0.7; }
 

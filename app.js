@@ -123,6 +123,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   await loadParams();   // load params.json before anything renders
   loadFromLocalStorage();
+  loadPersistedGDU();   // restore cached GDU results for schedule cards
   syncData();
 });
 
@@ -2424,8 +2425,23 @@ window.addEventListener('load', function() {
 
 
 // ── GDU FUNGICIDE PREDICTOR ──────────────────────────────────────────────────
-let gduResults  = [];   // cached results per session
+let gduResults  = [];   // cached results, persisted to localStorage
 let gduRunning  = false;
+
+function loadPersistedGDU() {
+  try {
+    const raw = localStorage.getItem('blueraven_gdu');
+    if (!raw) return;
+    const { results, ts } = JSON.parse(raw);
+    if (!results?.length) return;
+    // Only load if less than 24 hours old
+    const age = (Date.now() - new Date(ts).getTime()) / 3600000;
+    if (age > 24) return;
+    gduResults = results;
+    const lastRun = document.getElementById('gduLastRun');
+    if (lastRun) lastRun.textContent = 'Last run ' + new Date(ts).toLocaleDateString('en-US', { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' });
+  } catch(e) { console.warn('GDU load failed:', e); }
+}
 
 function switchGDUTab(tab, el) {
   document.querySelectorAll('.gdu-tab').forEach(t => t.classList.remove('active'));
@@ -2843,6 +2859,17 @@ async function runGDUAnalysis() {
   gduResults.sort((a, b) => (b.pctToVT || 0) - (a.pctToVT || 0));
 
   gduRunning = false;
+  // Persist results so schedule cards show GDU data without re-running
+  try {
+    const toStore = gduResults.map(r => {
+      const { withGDU, ...rest } = r; // omit large withGDU array from storage
+      return rest;
+    });
+    localStorage.setItem('blueraven_gdu', JSON.stringify({
+      results: toStore,
+      ts: new Date().toISOString()
+    }));
+  } catch(e) { console.warn('GDU storage failed:', e); }
   renderGDU();
   const lastRun = document.getElementById('gduLastRun');
   if (lastRun) lastRun.textContent = 'Updated ' + new Date().toLocaleTimeString();
@@ -3770,11 +3797,18 @@ function autoRouteDay(dateStr, pilotId) {
 }
 
 function getScheduleOrder(dateStr, pilotId) {
-  const key = `sched_order_${dateStr}_${pilotId || 'all'}`;
-  try {
-    const s = localStorage.getItem(key);
-    return s ? JSON.parse(s) : null;
-  } catch(e) { return null; }
+  // Try pilot-specific key first, then fall back to 'all' key
+  // (handles case where order was set while viewing "All Pilots")
+  const keys = pilotId
+    ? [`sched_order_${dateStr}_${pilotId}`, `sched_order_${dateStr}_all`]
+    : [`sched_order_${dateStr}_all`];
+  for (const key of keys) {
+    try {
+      const s = localStorage.getItem(key);
+      if (s) return JSON.parse(s);
+    } catch(e) {}
+  }
+  return null;
 }
 
 // ── ASSIGN ORDER TO DATE + PILOT ─────────────────────────────────────────────
