@@ -325,9 +325,14 @@ function toggleBatchOrder(orderId, el) {
   else selectedBatchOrders.add(orderId);
   const count = document.getElementById('batchCount');
   if (count) count.textContent = `${selectedBatchOrders.size} selected`;
-  // Refresh just the checkbox state without full re-render
+  // Update card state without full re-render
   const card = document.querySelector(`.order-card[data-id="${orderId}"]`);
-  if (card) card.classList.toggle('batch-selected', selectedBatchOrders.has(orderId));
+  if (card) {
+    const sel = selectedBatchOrders.has(orderId);
+    card.classList.toggle('batch-selected', sel);
+    const chk = card.querySelector('.batch-check');
+    if (chk) chk.textContent = sel ? '✓' : '';
+  }
 }
 
 async function applyBatchEdit() {
@@ -4020,11 +4025,19 @@ function renderSchedule() {
         <div class="sched-pool-header">
           Unscheduled <span class="sched-pool-count">${poolOrders.length}</span>
           <div class="sched-instructions">${
-            _schedSelected
-              ? '👆 Now tap a day to assign'
-              : poolOrders.length ? 'Tap a card, then tap a day' : ''
+            !_schedSelected ? (poolOrders.length ? 'Tap a card, then tap a day' : '') :
+            !_schedAssignPilot ? '👇 Select a pilot below' :
+            '👆 Now tap a day to assign'
           }</div>
           ${!AppSettings.homeBaseLat ? '<div class="sched-warn">⚠ Set home base in Settings for auto-route</div>' : ''}
+        </div>
+        <div id="schedPilotPicker" style="display:${_schedSelected && !scheduleState.activePilot ? 'block' : 'none'};padding:0.4rem 0.5rem;border-bottom:1px solid var(--border);background:var(--bg2)">
+          <div style="font-size:0.7rem;color:var(--text-sub);margin-bottom:0.3rem;font-weight:600;text-transform:uppercase;letter-spacing:0.05em">Assign to pilot:</div>
+          <div style="display:flex;flex-wrap:wrap;gap:0.3rem">
+            ${pilots.map(p => `<button class="sched-pilot-assign-btn ${_schedAssignPilot===p.PilotID?'active':''}"
+              data-pilot-id="${p.PilotID}"
+              onclick="schedPickPilot('${p.PilotID}')">${p.Name}</button>`).join('')}
+          </div>
         </div>
         <div class="sched-pool-list">${poolHtml}</div>
       </div>
@@ -4189,29 +4202,69 @@ function schedMoveCard(dateStr, orderId, dir, event) {
 }
 
 // ── DRAG AND DROP + TAP-TO-ASSIGN (iOS-compatible) ───────────────────────────
-let _schedSelected = null; // orderId currently tapped/selected in pool
+let _schedSelected     = null; // orderId currently tapped/selected in pool
+let _schedAssignPilot  = null; // pilot to assign on next tap-day (required)
 
 function schedSelectCard(orderId) {
-  _schedSelected = _schedSelected === orderId ? null : orderId;
-  // Update pool card highlights without full re-render (prevents scroll jump)
+  if (_schedSelected === orderId) {
+    // Deselect
+    _schedSelected    = null;
+    _schedAssignPilot = null;
+  } else {
+    _schedSelected    = orderId;
+    _schedAssignPilot = null; // reset pilot selection when new card selected
+    // Auto-set pilot if filter is already active
+    if (scheduleState.activePilot) {
+      _schedAssignPilot = scheduleState.activePilot;
+    }
+  }
+  // Update card highlights without scroll jump
   document.querySelectorAll('.sched-pool-card').forEach(el => {
     el.classList.toggle('sched-pool-selected', el.dataset.orderId === _schedSelected);
   });
-  // Update day columns tap-target class
   document.querySelectorAll('.sched-day-col').forEach(el => {
-    el.classList.toggle('sched-tap-target', !!_schedSelected);
+    el.classList.toggle('sched-tap-target', !!(_schedSelected && _schedAssignPilot));
   });
-  // Update instruction text
+  // Show/hide pilot picker
+  const picker = document.getElementById('schedPilotPicker');
+  if (picker) {
+    picker.style.display = (_schedSelected && !scheduleState.activePilot) ? 'block' : 'none';
+  }
+  // Update instructions
   const instrEl = document.querySelector('.sched-instructions');
-  if (instrEl) instrEl.textContent = _schedSelected ? '👆 Now tap a day to assign' : 'Tap a card, then tap a day';
+  if (instrEl) {
+    if (!_schedSelected) instrEl.textContent = 'Tap a card, then tap a day';
+    else if (!_schedAssignPilot) instrEl.textContent = '👇 Select a pilot below';
+    else instrEl.textContent = '👆 Now tap a day to assign';
+  }
+}
+
+function schedPickPilot(pilotId) {
+  _schedAssignPilot = pilotId;
+  // Highlight selected pilot button
+  document.querySelectorAll('.sched-pilot-assign-btn').forEach(el => {
+    el.classList.toggle('active', el.dataset.pilotId === pilotId);
+  });
+  // Enable day columns now that pilot is chosen
+  document.querySelectorAll('.sched-day-col').forEach(el => {
+    el.classList.toggle('sched-tap-target', true);
+  });
+  const instrEl = document.querySelector('.sched-instructions');
+  if (instrEl) instrEl.textContent = '👆 Now tap a day to assign';
 }
 
 function schedTapDay(date) {
-  // If a card is selected, assign it; otherwise open detail
   if (_schedSelected) {
-    const pilotId = scheduleState.activePilot || null;
-    schedAssign(_schedSelected, date, pilotId);
-    _schedSelected = null;
+    if (!_schedAssignPilot) {
+      showToast('Select a pilot first', 'error');
+      return;
+    }
+    schedAssign(_schedSelected, date, _schedAssignPilot);
+    _schedSelected    = null;
+    _schedAssignPilot = null;
+    // Hide pilot picker
+    const picker = document.getElementById('schedPilotPicker');
+    if (picker) picker.style.display = 'none';
   } else {
     schedSelectDay(date);
   }
@@ -4236,8 +4289,12 @@ function schedDrop(event, toDay) {
   event.currentTarget.classList.remove('sched-drop-target');
   const orderId = event.dataTransfer.getData('text/plain');
   if (!orderId) return;
-  const pilotId = scheduleState.activePilot || '';
-  schedAssign(orderId, toDay, pilotId || null);
+  const pilotId = scheduleState.activePilot || _schedAssignPilot || '';
+  if (!pilotId) {
+    showToast('Select a pilot filter first to use drag-and-drop', 'error');
+    return;
+  }
+  schedAssign(orderId, toDay, pilotId);
 }
 
 // Unschedule an order (move back to pool)

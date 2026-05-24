@@ -1132,3 +1132,22 @@ body.light .leaflet-container { background: #e8e8e8; }
   border-radius: 99px; padding: 0 5px; white-space: nowrap;
 }
 
+/* Pilot assign buttons in scheduler pool */
+.sched-pilot-assign-btn {
+  padding: 0.25rem 0.7rem; border-radius: 99px; font-size: 0.78rem; font-weight: 500;
+  border: 1px solid var(--border); background: var(--bg3); color: var(--text-sub);
+  cursor: pointer; transition: all 0.15s;
+}
+.sched-pilot-assign-btn.active,
+.sched-pilot-assign-btn:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+/* Card overflow — force wrap on all text within cards */
+.sched-pool-card *, .sched-day-card * {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.sched-suggest-label {
+  font-size: 0.68rem; color: var(--accent2); margin-top: 2px; font-weight: 500;
+  white-space: normal; word-break: break-word; overflow: hidden;
+}
+

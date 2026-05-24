@@ -79,9 +79,10 @@ window.GDUCalc = (() => {
       } catch(e) { console.warn('Tier 1 (archive) failed:', e.message); }
     }
 
-    // TIER 2 — GFS/HRRR forecast (recent actual + 14-day forecast)
-    const t2S = startDate > t2Start ? startDate : t2Start;
-    const t2E = endDate   < t2End   ? endDate   : t2End;
+    // TIER 2 — GFS/HRRR forecast + past_days=92 for recent history
+    // Use startDate directly so recent plantings (< 92 days) get full coverage
+    const t2S = startDate; // past_days=92 covers up to 3 months back
+    const t2E = endDate < t2End ? endDate : t2End;
     if (t2S <= t2E) {
       try {
         const fcst = await fetchForecast(lat, lng, t2S, t2E);
@@ -124,11 +125,13 @@ window.GDUCalc = (() => {
   }
 
   async function fetchForecast(lat, lng, start, end) {
+    // past_days=92 lets forecast API serve ~3 months of recent history
+    // This is the primary fallback when archive fails for recent plantings
     const url = `https://api.open-meteo.com/v1/forecast?` +
       `latitude=${lat}&longitude=${lng}` +
       `&daily=temperature_2m_max,temperature_2m_min` +
       `&temperature_unit=fahrenheit&timezone=America%2FChicago` +
-      `&forecast_days=16`;
+      `&forecast_days=16&past_days=92`;
     const res  = await fetch(url);
     if (!res.ok) throw new Error(`Forecast API HTTP ${res.status}`);
     const data = await res.json();
