@@ -2439,9 +2439,9 @@ function loadPersistedGDU() {
     if (!raw) return;
     const { results, ts } = JSON.parse(raw);
     if (!results?.length) return;
-    // Only load if less than 24 hours old
+    // Only load if less than 7 days old (GDU windows change slowly)
     const age = (Date.now() - new Date(ts).getTime()) / 3600000;
-    if (age > 24) return;
+    if (age > 168) return;
     gduResults = results;
     const lastRun = document.getElementById('gduLastRun');
     if (lastRun) lastRun.textContent = 'Last run ' + new Date(ts).toLocaleDateString('en-US', { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' });
@@ -3894,9 +3894,11 @@ function buildSchedCardBody(o, { compact = false } = {}) {
     if (meta) html += `<div class="sched-card-meta">${meta}</div>`;
 
     // GDU window — vtDate is true VT (100%), windowEnd is R2 cutoff
+    const fmtShort = d => { try { const dt=new Date(d+'T12:00:00'); return dt.toLocaleDateString('en-US',{month:'short',day:'numeric'}); } catch(e){return d||'';} };
     if (gr && gr.vtDate) {
-      const fmtShort = d => { try { const dt=new Date(d+'T12:00:00'); return dt.toLocaleDateString('en-US',{month:'short',day:'numeric'}); } catch(e){return d||'';} };
       html += `<div class="sched-suggest-label">VT ${fmtShort(gr.vtDate)} · R2 ${fmtShort(gr.windowEnd)}</div>`;
+    } else if (o.PlantingDate && o.RelativeMaturity) {
+      html += `<div class="sched-suggest-label sched-suggest-hint">Run GDU for window dates</div>`;
     }
 
     // Products (toggled by scheduleState.showProducts)

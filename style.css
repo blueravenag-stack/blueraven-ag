@@ -1151,6 +1151,7 @@ body.light .leaflet-container { background: #e8e8e8; }
   font-size: 0.68rem; color: var(--accent2); margin-top: 2px; font-weight: 500;
   white-space: normal; word-break: break-word;
 }
+.sched-suggest-hint { color: var(--text-sub); font-weight: 400; font-style: italic; }
 
 /* ── SMART SCHEDULE v4.7 — per-pilot stacked rows ─────────────────────────── */
 
