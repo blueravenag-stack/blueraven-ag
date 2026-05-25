@@ -2854,6 +2854,7 @@ async function runGDUAnalysis() {
   gduResults = [];
   // Deduplicate weather fetches by location (lat/lng rounded to 2dp ≈ 1km)
   // and run all orders in parallel for speed
+  // Deduplicate weather by location, batch in groups of 3 to avoid 429s
   const weatherCache = {};
   const fetchCached = async (lat, lng, plantDate, endDate) => {
     const key = `${lat.toFixed(2)},${lng.toFixed(2)}`;
@@ -2863,16 +2864,22 @@ async function runGDUAnalysis() {
     return weatherCache[key];
   };
 
-  const results = await Promise.allSettled(cornOrders.map(async o => {
-    const orderField = DB.orderFields.find(f => f.OrderID === o.OrderID);
-    const field = orderField ? DB.fields.find(f => f.FieldID === orderField.FieldID) : null;
-    return GDUCalc.analyzeOrder(o, field, fetchCached);
-  }));
-
-  results.forEach(r => {
-    if (r.status === 'fulfilled') gduResults.push(r.value);
-    else gduResults.push({ error: r.reason?.message || 'Analysis failed', orderId: '' });
-  });
+  // Run in batches of 3 with a 400ms gap to stay under rate limits
+  const BATCH_SIZE = 3;
+  for (let i = 0; i < cornOrders.length; i += BATCH_SIZE) {
+    const batch = cornOrders.slice(i, i + BATCH_SIZE);
+    const batchResults = await Promise.allSettled(batch.map(async o => {
+      const orderField = DB.orderFields.find(f => f.OrderID === o.OrderID);
+      const field = orderField ? DB.fields.find(f => f.FieldID === orderField.FieldID) : null;
+      return GDUCalc.analyzeOrder(o, field, fetchCached);
+    }));
+    batchResults.forEach(r => {
+      if (r.status === 'fulfilled') gduResults.push(r.value);
+      else gduResults.push({ error: r.reason?.message || 'Analysis failed', orderId: '' });
+    });
+    // Brief pause between batches to avoid rate limiting
+    if (i + BATCH_SIZE < cornOrders.length) await new Promise(res => setTimeout(res, 400));
+  }
 
   // Sort by urgency (highest pctToTarget first)
   gduResults.sort((a, b) => (b.pctToVT || 0) - (a.pctToVT || 0));
@@ -4006,7 +4013,6 @@ function renderSchedule() {
           ondrop="schedDrop(event,'${date}','${pilotId||''}')"
           onclick="schedTapDay('${date}','${pilotId||''}')">
         <div class="sched-day-header">
-          <span class="sched-day-label ${isToday ? 'sched-today-label' : ''}">${schedFmtDay(date)}</span>
           <span class="sched-day-acres">${totalAc.toFixed(0)}${target ? '/' + target : ''} ac</span>
         </div>
         ${target ? `<div class="sched-acre-bar"><div class="sched-acre-fill" style="width:${pct}%;background:${barColor}"></div></div>` : ''}
@@ -4067,10 +4073,14 @@ function renderSchedule() {
         <div class="sched-pool-list">${poolHtml}</div>
       </div>
       <div class="sched-grid">
-        <div class="sched-week-header">
-          ${weekDates.map(d => `<div class="sched-week-day-lbl ${d === today ? 'sched-today-label' : ''}">${schedFmtDay(d)}</div>`).join('')}
+        <div class="sched-grid-scroll">
+          <div class="sched-grid-inner">
+            <div class="sched-week-header">
+              ${weekDates.map(d => `<div class="sched-week-day-lbl ${d === today ? 'sched-today-label' : ''}">${schedFmtDay(d)}</div>`).join('')}
+            </div>
+            <div class="sched-pilot-rows">${pilotSections}</div>
+          </div>
         </div>
-        <div class="sched-pilot-rows">${pilotSections}</div>
       </div>
       <div class="sched-detail" id="schedDetail">
         <div class="sched-detail-placeholder">Click a day to see field map</div>

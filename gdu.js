@@ -131,7 +131,7 @@ window.GDUCalc = (() => {
       `latitude=${lat}&longitude=${lng}` +
       `&daily=temperature_2m_max,temperature_2m_min` +
       `&temperature_unit=fahrenheit&timezone=America%2FChicago` +
-      `&forecast_days=16&past_days=92`;
+      `&forecast_days=16&past_days=60`;
     const res  = await fetch(url);
     if (!res.ok) throw new Error(`Forecast API HTTP ${res.status}`);
     const data = await res.json();

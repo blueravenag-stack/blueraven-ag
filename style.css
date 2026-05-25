@@ -1000,15 +1000,10 @@ body.light .leaflet-container { background: #e8e8e8; }
 .sched-urg-early    { background: var(--text-sub); }
 
 /* Week grid */
-.sched-grid { flex: 1; overflow: hidden; display: flex; flex-direction: column; min-height: 0; }
-.sched-cols { display: flex; overflow-x: auto; overflow-y: visible; min-height: 0; }
+/* sched-grid, sched-cols — see v4.7 section below */
 
 /* Day column */
-.sched-day-col {
-  flex: 1; min-width: 130px; max-width: 200px;
-  border-right: 1px solid var(--border); display: flex; flex-direction: column;
-  transition: background 0.15s; cursor: pointer; min-height: 0; height: 100%;
-}
+/* sched-day-col — see v4.7 section below */
 .sched-day-col:last-child { border-right: none; }
 .sched-day-col.sched-today { background: rgba(79,195,247,0.04); }
 .sched-day-col.sched-day-active { background: rgba(79,195,247,0.08); }
@@ -1163,35 +1158,67 @@ body.light .leaflet-container { background: #e8e8e8; }
 }
 .sched-toggle-btn.active { background: var(--bg3); color: var(--text); border-color: var(--accent); }
 
-/* Grid — flex column containing week header + pilot rows */
-.sched-grid {
-  flex: 1; overflow: hidden; display: flex; flex-direction: column; min-height: 0;
+/* Pool: fixed width column on left */
+.sched-pool {
+  width: 200px; flex-shrink: 0; border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; background: var(--bg2); overflow: hidden;
 }
 
-/* Week date header — offset by pilot label width */
+/*
+ * GRID LAYOUT STRATEGY:
+ * The grid is a single horizontal scroll container.
+ * Week header + all pilot rows scroll together as one unit.
+ * The pilot label (90px) is position:sticky left:0 inside the scroll.
+ * The week header date cells align with the day columns.
+ */
+.sched-grid {
+  flex: 1; display: flex; flex-direction: column;
+  overflow: hidden; min-height: 0;
+}
+
+/* Outer scroll wrapper — horizontal scroll for the whole grid */
+.sched-grid-scroll {
+  flex: 1; overflow-x: auto; overflow-y: hidden;
+  display: flex; flex-direction: column; min-height: 0;
+  /* Always show scrollbar on desktop so it's obvious */
+  scrollbar-width: thin;
+}
+.sched-grid-scroll::-webkit-scrollbar { height: 6px; }
+.sched-grid-scroll::-webkit-scrollbar-track { background: var(--bg2); }
+.sched-grid-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* Inner — wide enough for all 7 cols + pilot label */
+.sched-grid-inner {
+  display: flex; flex-direction: column;
+  min-width: calc(90px + 7 * 150px); /* label + 7 cols */
+  flex: 1; min-height: 0;
+}
+
+/* Week date header — sticky at top when scrolling down through pilot rows */
 .sched-week-header {
-  display: flex; margin-left: 90px; border-bottom: 1px solid var(--border);
-  background: var(--bg2); flex-shrink: 0; overflow-x: hidden;
+  display: flex; margin-left: 90px; /* align with day cols, not pilot label */
+  border-bottom: 1px solid var(--border); background: var(--bg2);
+  flex-shrink: 0; position: sticky; top: 0; z-index: 3;
 }
 .sched-week-day-lbl {
-  flex: 1; min-width: 120px; font-size: 0.72rem; font-weight: 600;
-  padding: 0.25rem 0.4rem; color: var(--text-sub);
+  flex: 1; width: 150px; font-size: 0.75rem; font-weight: 600;
+  padding: 0.3rem 0.5rem; color: var(--text-sub);
   border-right: 1px solid var(--border);
 }
 .sched-week-day-lbl:last-child { border-right: none; }
 .sched-week-day-lbl.sched-today-label { color: var(--accent); }
 
-/* Pilot rows scroll vertically */
+/* Pilot rows scroll vertically inside the grid-scroll */
 .sched-pilot-rows { flex: 1; overflow-y: auto; min-height: 0; }
 
-/* One pilot row — flex-row: label | day-cols */
+/* One pilot row — flex-row: sticky label | 7 day cols */
 .sched-pilot-row {
   display: flex; flex-direction: row; border-bottom: 2px solid var(--border);
   align-items: stretch; min-height: 120px;
 }
 .sched-pilot-row-ua { opacity: 0.75; }
 
-/* LEFT: sticky pilot label */
+/* LEFT: sticky pilot label — stays visible when scrolling right */
 .sched-pilot-label {
   width: 90px; flex-shrink: 0;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -1210,23 +1237,32 @@ body.light .leaflet-container { background: #e8e8e8; }
   font-size: 0.65rem; padding: 0.15rem 0.3rem; margin-top: 0.2rem;
 }
 
-/* RIGHT: day columns scroll horizontally */
+/* RIGHT: day cols — not scrolling independently, laid out in row */
 .sched-pilot-row .sched-cols {
-  display: flex; flex: 1; overflow-x: auto; overflow-y: visible; min-height: 0;
+  display: flex; flex: 1; overflow: visible; min-height: 0;
 }
 
-/* Pool: wider on desktop, taller on mobile */
-.sched-pool {
-  width: 220px; flex-shrink: 0; border-right: 1px solid var(--border);
-  display: flex; flex-direction: column; background: var(--bg2); overflow: hidden;
+/* Day columns — fixed width matching week header cells */
+.sched-day-col {
+  flex: none; width: 150px;
+  border-right: 1px solid var(--border); display: flex; flex-direction: column;
+  transition: background 0.15s; cursor: pointer; min-height: 0;
+}
+
+/* Day header — just acres + bar, no date (week header handles dates) */
+.sched-day-header {
+  padding: 0.25rem 0.5rem 0.1rem; border-bottom: 1px solid var(--border);
+  flex-shrink: 0; font-size: 0.7rem; color: var(--text-sub);
 }
 
 @media (max-width: 700px) {
-  .sched-pool { width: 100%; height: auto; max-height: 280px; border-right: none; border-bottom: 1px solid var(--border); }
+  .sched-pool { width: 100%; height: auto; max-height: 260px; border-right: none; border-bottom: 1px solid var(--border); }
   .sched-pool-list { display: flex; flex-direction: row; overflow-x: auto; overflow-y: visible; padding: 0.3rem; }
   .sched-pool-card { min-width: 180px; max-width: 220px; margin-right: 0.35rem; margin-bottom: 0; flex-shrink: 0; }
+  .sched-grid-inner { min-width: calc(70px + 7 * 120px); }
   .sched-week-header { margin-left: 70px; }
   .sched-pilot-label { width: 70px; }
-  .sched-week-day-lbl { min-width: 100px; }
+  .sched-week-day-lbl { width: 120px; }
+  .sched-day-col { width: 120px; }
 }
 
