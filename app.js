@@ -2085,6 +2085,12 @@ const _PRINT_CSS = `
   .prod-table tr:last-child td { border-bottom: none; }
   .by-customer { color: #2e7d32; font-weight: 500; }
   .field-map { width: 100%; height: 420px; border-radius: 6px; border: 1px solid #dde2ea; }
+  .cust-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+  .cust-table th { text-align: left; padding: 4px 8px; background: #1a2332; color: #fff; font-size: 10px; font-weight: 500; letter-spacing: 0.04em; }
+  .cust-table td { padding: 5px 8px; border-bottom: 1px solid #eee; vertical-align: top; }
+  .cust-table tr:nth-child(even) td { background: #f9fafb; }
+  .prod-chip { display: inline-block; background: #eef2f7; border-radius: 3px; padding: 1px 5px; margin: 1px 2px 1px 0; font-size: 10px; white-space: nowrap; }
+  .prod-chip.by-customer { background: #e8f5e9; color: #2e7d32; }
   .summary-row { display: flex; gap: 24px; flex-wrap: wrap; padding: 8px 0; border-top: 1px solid #e0e0e0; margin-top: 4px; }
   .summary-item .summary-val { font-size: 16px; font-weight: 700; color: #1a2332; }
   .summary-item .summary-lbl { font-size: 10px; color: #888; }
@@ -2330,27 +2336,32 @@ window.addEventListener('load', function() {
     html += '<div class="section"><div class="section-title">Field Map — ' + fmtD(block.date) + '</div>';
     html += '<div id="custmap_' + bi + '" class="field-map"></div></div>';
     html += '<div class="section"><div class="section-title">Fields &amp; Products</div>';
+    html += '<table class="cust-table"><thead><tr><th>#</th><th>Fields</th><th>Acres</th><th>Crop</th><th>Products</th><th>Status</th></tr></thead><tbody>';
     block.rows.forEach(function(r, ri) {
       var color = COLORS[ri % COLORS.length];
       var badge = r.status === 'Completed' ? 'completed' : r.status === 'Scheduled' ? 'scheduled' : 'open';
-      html += '<div class="order-card"><div class="order-card-header">';
-      html += '<div style="display:flex;align-items:center;gap:8px"><span style="width:18px;height:18px;border-radius:50%;background:' + color + ';display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:10px;font-weight:700;flex-shrink:0">' + r.num + '</span>';
-      html += '<div><div class="order-card-title">' + r.fieldNames + '</div>';
-      html += '<div class="order-card-sub">' + r.acres.toFixed(1) + ' ac · ' + r.crop + '</div></div></div>';
-      html += '<span class="order-card-badge badge-' + badge + '">' + r.status + '</span>';
-      html += '</div><div class="order-card-body">';
-      if (r.prods.length) {
-        html += '<table class="prod-table"><thead><tr><th>Product</th><th>Rate</th><th>Total Needed</th><th>Supplied By</th></tr></thead><tbody>';
-        r.prods.forEach(function(p) {
-          html += '<tr><td>' + p.name + '</td><td>' + p.rate + ' ' + p.unit + '/ac</td><td>' + _fmtAmt(parseFloat(p.total||0), p.unit) + '</td>';
-          html += '<td class="' + (p.by === 'Customer' ? 'by-customer' : '') + '">' + (p.by === 'Customer' ? 'Customer' : 'Applicator') + '</td></tr>';
-        });
-        html += '</tbody></table>';
-      }
-      if (r.notes) html += '<div style="margin-top:6px;font-size:12px;color:#555">Notes: ' + r.notes + '</div>';
-      html += '</div></div>';
+      var prodsHtml = r.prods.length
+        ? r.prods.map(function(p) {
+            var qty = _fmtAmt(parseFloat(p.total||0), p.unit);
+            return '<span class="prod-chip' + (p.by === 'Customer' ? ' by-customer' : '') + '">' + p.name + ' ' + p.rate + ' ' + p.unit + '/ac (' + qty + ')</span>';
+          }).join('')
+        : '<span style="color:#aaa">—</span>';
+      html += '<tr>';
+      html += '<td><span class="row-num" style="background:' + color + '">' + r.num + '</span></td>';
+      html += '<td><strong>' + r.fieldNames + '</strong>' + (r.notes ? '<br><span style="color:#888;font-size:10px">' + r.notes + '</span>' : '') + '</td>';
+      html += '<td style="white-space:nowrap">' + r.acres.toFixed(1) + ' ac</td>';
+      html += '<td>' + r.crop + '</td>';
+      html += '<td>' + prodsHtml + '</td>';
+      html += '<td><span class="order-card-badge badge-' + badge + '">' + r.status + '</span></td>';
+      html += '</tr>';
     });
-    html += '</div></div>';
+    html += '</tbody></table>';
+    // Summary row
+    html += '<div style="display:flex;gap:20px;padding:6px 0;border-top:1px solid #e0e0e0;margin-top:6px;font-size:11px;color:#555">';
+    html += '<span><strong>' + block.rows.length + '</strong> order' + (block.rows.length !== 1 ? 's' : '') + '</span>';
+    html += '<span><strong>' + block.totalAcres.toFixed(1) + ' ac</strong> total</span>';
+    html += '</div>';
+    html += '</div>';
     body.insertAdjacentHTML('beforeend', html);
   });
 })();
@@ -4420,7 +4431,7 @@ function schedRenderDetail(date) {
 
     // Route line between field centroids in order
     const routePts = [];
-    const _rhb = getHomeBase(pilotId);
+    const _rhb = getHomeBase(activePilot);
     if (_rhb) routePts.push([_rhb.lat, _rhb.lng]);
     dayOrders.forEach(o => {
       const of = DB.orderFields.find(f => f.OrderID === o.OrderID);
