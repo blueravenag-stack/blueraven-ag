@@ -69,9 +69,42 @@ function handleWriteData(table, data) {
   if (!sheet) return jsonOut({ error: 'Sheet not found: ' + tabName });
 
   const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  const idValue = String(data[headers[0]] || '');
   const lastRow = sheet.getLastRow();
 
+  // ── Special upsert for templateProds: match on TemplateID + ProductID ──
+  if (table === 'templateProds' && !data._delete) {
+    const tmplCol = headers.indexOf('TemplateID');
+    const prodCol = headers.indexOf('ProductID');
+    if (tmplCol > -1 && prodCol > -1 && lastRow > 1) {
+      const allRows = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
+      const matchIdx = allRows.findIndex(r =>
+        String(r[tmplCol]) === String(data['TemplateID'] || '') &&
+        String(r[prodCol])  === String(data['ProductID']  || '')
+      );
+      if (matchIdx > -1) {
+        // Update in place, preserving the original LineID
+        const existingLineId = allRows[matchIdx][0];
+        const rowValues = headers.map(h => {
+          if (h === headers[0]) return existingLineId; // preserve original LineID
+          return (data[h] !== undefined && data[h] !== null) ? data[h] : '';
+        });
+        sheet.getRange(matchIdx + 2, 1, 1, rowValues.length).setValues([rowValues]);
+        return jsonOut({ success: true, action: 'updated' });
+      }
+      // Not found — insert with a clean ID (no _N suffix)
+      const allIds = allRows.map(r => String(r[0]));
+      const maxNum = allIds.reduce((max, id) => {
+        const m = id.match(/^MTP-(\d+)$/);
+        return m ? Math.max(max, parseInt(m[1], 10)) : max;
+      }, 0);
+      data[headers[0]] = 'MTP-' + String(maxNum + 1).padStart(3, '0');
+      const rowValues = headers.map(h => (data[h] !== undefined && data[h] !== null) ? data[h] : '');
+      sheet.appendRow(rowValues);
+      return jsonOut({ success: true, action: 'inserted' });
+    }
+  }
+
+  const idValue = String(data[headers[0]] || '');
   let rowIdx = -1;
   if (lastRow > 1) {
     const ids = sheet.getRange(2, 1, lastRow-1, 1).getValues().flat().map(String);

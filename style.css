@@ -58,7 +58,7 @@ body { display: flex; min-height: 100vh; }
   flex: 1;
   padding: 2rem 2.5rem;
   min-height: 100vh;
-  max-width: 1200px;
+  max-width: 1600px;
 }
 
 /* ── SIDEBAR ── */
@@ -1266,3 +1266,18 @@ body.light .leaflet-container { background: #e8e8e8; }
   .sched-day-col { width: 120px; }
 }
 
+/* ── v4.3 additions ────────────────────────────────────────────────────────── */
+
+/* Report customer page tabs */
+.report-cust-tabs { display:flex; flex-wrap:wrap; gap:0.35rem; margin-bottom:1rem; }
+.report-cust-tab { padding:0.3rem 0.75rem; font-size:0.8rem; border-radius:var(--radius); border:1px solid var(--border); background:var(--bg2); color:var(--text-sub); cursor:pointer; transition:background 0.15s,color 0.15s; }
+.report-cust-tab.active, .report-cust-tab:hover { background:var(--accent); color:#fff; border-color:var(--accent); }
+
+/* Crop filter chips (template picker & mix calc) */
+.mix-crop-chip.active, .order-tmpl-chip.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+
+/* GDU filter bar */
+#gduFilterText, #gduSortBy { font-size:0.82rem; }
+
+/* Ensure chem-line unit select matches text input width */
+.chem-line select.unit-field { min-width:90px; }

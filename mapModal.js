@@ -123,7 +123,7 @@ window.MapModal = (() => {
 
     // Labels overlay
     L.tileLayer(
-      'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+      'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}',
       { maxZoom: 19, opacity: 0.7 }
     ).addTo(map);
 

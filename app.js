@@ -34,7 +34,7 @@ let AppParams = {
   defaultSprayRate: 2,
   defaultTankSize: 100,
   appName: 'Blue Raven Ag',
-  version: '4.2'
+  version: '4.3'
 };
 
 async function loadParams() {
@@ -55,7 +55,7 @@ async function loadParams() {
 let AppSettings = {
   defaultSprayRate: 2,      // gal/ac
   defaultTankSize:  100,    // gallons
-  homeBaseLat:      null,   // scheduling home base
+  homeBaseLat:      null,   // scheduling home base (global fallback)
   homeBaseLng:      null,
   homeBaseLabel:    '',
   pilotTargets:     {},     // { PilotID: acresPerDay }
@@ -235,7 +235,7 @@ function parseSheet(rows, expectedHeaders) {
 // Header definitions match sheet columns exactly
 function orderHeaders()       { return ['OrderID','OrderDate','CustomerID','CustomerName','CropType','PlantingDate','RelativeMaturity','ScheduledDate','CompletedDate','PilotID','PilotName','Status','PricingType','RatePerAcre','TotalAcres','EstimatedTotal','ChemicalCost','TemplateUsed','Invoiced','DJI_FlightFile','Attachments','Notes']; }
 function customerHeaders()    { return ['CustomerID','Name','Phone','Email','Address','City','State','Zip','Notes']; }
-function pilotHeaders()       { return ['PilotID','Name','Phone','Email','FAA_Part107_Num','Active']; }
+function pilotHeaders()       { return ['PilotID','Name','Phone','Email','FAA_Part107_Num','Active','HomeBaseLat','HomeBaseLng','HomeBaseLabel']; }
 function productHeaders()     { return ['ProductID','ProductName','Manufacturer','Unit','CostPerUnit','REI_Hours','PHI_Days','Notes']; }
 function templateHeaders()    { return ['TemplateID','TemplateName','CropType','SprayRate','Description','Active']; }
 function templateProdHeaders(){ return ['LineID','TemplateID','ProductID','ProductName','RatePerAcre','Unit','SuppliedBy','Notes']; }
@@ -715,7 +715,7 @@ async function openCustomerMiniMap() {
   _custMiniMap = L.map('cMiniMap', { zoomControl: true }).setView([centerLat, centerLng], 13);
   L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
     { attribution: 'Imagery © Esri', maxZoom: 19 }).addTo(_custMiniMap);
-  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}',
     { maxZoom: 19, opacity: 0.7 }).addTo(_custMiniMap);
 
   // Place pin if coords already set
@@ -915,6 +915,10 @@ function addMixChemLine(prefill) {
     `<option value="${p.ProductID}" data-unit="${p.Unit}" ${prefill?.ProductID === p.ProductID ? 'selected' : ''}>${p.ProductName}</option>`
   ).join('');
 
+  const unitOptions = ['fl oz','pt','qt','gal','lb','oz (wt)'].map(u =>
+    `<option value="${u}" ${(prefill?.Unit || 'fl oz') === u ? 'selected' : ''}>${u}</option>`
+  ).join('');
+
   div.innerHTML = `
     <div class="form-group" style="margin:0">
       <label class="form-label">Product</label>
@@ -928,7 +932,9 @@ function addMixChemLine(prefill) {
     </div>
     <div class="form-group" style="margin:0">
       <label class="form-label">Unit</label>
-      <input class="form-input unit-field" type="text" value="${prefill?.Unit||'fl oz'}" placeholder="fl oz">
+      <select class="form-input unit-field">
+        ${unitOptions}
+      </select>
     </div>
     <div class="form-group" style="margin:0">
       <label class="form-label">By</label>
@@ -958,14 +964,18 @@ async function saveMix() {
     Description:  document.getElementById('mDescription').value.trim(),
   };
 
-  // Gather chemical lines
+  // Gather chemical lines — reuse existing LineIDs when editing to avoid duplicates
+  const existingLines = editId ? DB.templateProds.filter(p => p.TemplateID === editId) : [];
   const lines = [...document.getElementById('mixChemLines').querySelectorAll('.chem-line')].map((line, i) => {
     const selects = line.querySelectorAll('select');
     const inputs  = line.querySelectorAll('input');
     const prodId  = selects[0].value;
     const prod    = DB.products.find(p => p.ProductID === prodId);
+    // Reuse LineID if this product already existed in the template
+    const existing = existingLines.find(e => e.ProductID === prodId);
+    const lineId   = existing ? existing.LineID : nextId('MTP', DB.templateProds.map(p => p.LineID));
     return {
-      LineID:      nextId('MTP', DB.templateProds.map(p => p.LineID)) + '_' + i,
+      LineID:      lineId,
       TemplateID:  templateId,
       ProductID:   prodId,
       ProductName: prod?.ProductName || '',
@@ -1552,6 +1562,24 @@ function openMapForField() {
 
 
 // ── UNIT CONVERSION ───────────────────────────────────────────────────────────
+// Convert an entered rate/amount from its display unit to the product's stored unit for cost math.
+// Liquid conversions all go to fl oz. Dry (lb / oz(wt)) pass through unchanged.
+const LIQUID_TO_FLOZ = { 'fl oz': 1, 'pt': 16, 'qt': 32, 'gal': 128, 'gallon': 128, 'pint': 16, 'quart': 32 };
+function toBaseUnits(amount, enteredUnit, productUnit) {
+  const eu = (enteredUnit || '').toLowerCase().trim();
+  const pu = (productUnit  || '').toLowerCase().trim();
+  // If both are dry units or same category, no conversion needed
+  if (eu === pu) return amount;
+  const euFactor = LIQUID_TO_FLOZ[eu];
+  const puFactor = LIQUID_TO_FLOZ[pu];
+  if (euFactor !== undefined && puFactor !== undefined) {
+    // Convert entered → fl oz → product unit
+    return amount * euFactor / puFactor;
+  }
+  // Dry units or unknown — return as-is
+  return amount;
+}
+
 function smartUnit(amount, unit) {
   // Convert to sensible display unit based on quantity
   const u = (unit || '').toLowerCase().trim();
@@ -1730,14 +1758,40 @@ function runOrderCalc() {
 function renderMixCalc() {
   const tmplSel = document.getElementById('mixCalcTemplate');
   if (tmplSel) {
-    tmplSel.innerHTML = '<option value="">— Select template —</option>';
-    DB.templates.filter(t => t.Active === 'Yes').forEach(t => {
-      const o = document.createElement('option');
-      o.value = t.TemplateID;
-      o.textContent = t.TemplateName + ' (' + t.CropType + (t.SprayRate ? ' · ' + t.SprayRate + ' gal/ac' : '') + ')';
-      tmplSel.appendChild(o);
-    });
+    // Build crop filter if not already there
+    if (!document.getElementById('mixCalcCropFilter')) {
+      const filterWrap = document.createElement('div');
+      filterWrap.id = 'mixCalcCropFilter';
+      filterWrap.style.cssText = 'display:flex;gap:0.4rem;flex-wrap:wrap;margin-bottom:0.5rem';
+      const crops = ['All', ...new Set(DB.templates.filter(t=>t.Active==='Yes').map(t=>t.CropType).filter(Boolean))];
+      filterWrap.innerHTML = crops.map(c =>
+        `<button class="btn-ghost mix-crop-chip ${c==='All'?'active':''}" style="font-size:0.75rem;padding:0.2rem 0.6rem" onclick="filterMixCalcTemplates('${c}',this)">${c}</button>`
+      ).join('');
+      tmplSel.parentNode.insertBefore(filterWrap, tmplSel);
+    }
+    populateMixCalcTemplates('All');
   }
+  runMixCalc();
+}
+
+function populateMixCalcTemplates(cropFilter) {
+  const tmplSel = document.getElementById('mixCalcTemplate');
+  if (!tmplSel) return;
+  const prev = tmplSel.value;
+  tmplSel.innerHTML = '<option value="">— Select template —</option>';
+  DB.templates.filter(t => t.Active === 'Yes' && (cropFilter === 'All' || t.CropType === cropFilter)).forEach(t => {
+    const o = document.createElement('option');
+    o.value = t.TemplateID;
+    o.textContent = t.TemplateName + ' (' + t.CropType + (t.SprayRate ? ' · ' + t.SprayRate + ' gal/ac' : '') + ')';
+    tmplSel.appendChild(o);
+  });
+  if (prev) tmplSel.value = prev;
+}
+
+function filterMixCalcTemplates(crop, btn) {
+  document.querySelectorAll('.mix-crop-chip').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  populateMixCalcTemplates(crop);
   runMixCalc();
 }
 
@@ -2096,7 +2150,7 @@ function _addFieldToMap(map, field, color, label) {
 function _makeSatMap(container) {
   var m = L.map(container, { zoomControl: true, scrollWheelZoom: false });
   L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19 }).addTo(m);
-  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, opacity: 0.7 }).addTo(m);
+  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, opacity: 0.7 }).addTo(m);
   return m;
 }`;
 
@@ -2501,11 +2555,50 @@ function renderGDU() {
 
   // Show results
   container.innerHTML = `
-    <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:1rem;flex-wrap:wrap">
+    <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.75rem;flex-wrap:wrap">
       <button class="btn-secondary" onclick="runGDUAnalysis()">🔄 Refresh Analysis</button>
       <span style="font-size:0.8rem;color:var(--text-sub)" id="gduLastRun"></span>
     </div>
-    ${gduResults.map(r => renderGDUCard(r)).join('')}`;
+    <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-bottom:1rem;align-items:center">
+      <input class="filter-input" type="text" id="gduFilterText" placeholder="Filter customer / field..." style="max-width:220px" oninput="renderGDUFiltered()">
+      <select class="filter-select" id="gduSortBy" onchange="renderGDUFiltered()" style="max-width:200px">
+        <option value="urgency">Sort: Urgency</option>
+        <option value="customer">Sort: Customer</option>
+        <option value="target">Sort: Target Date</option>
+        <option value="scheduled">Sort: Scheduled Date</option>
+      </select>
+    </div>
+    <div id="gduCardContainer">${renderGDUCards(gduResults)}</div>`;
+}
+
+function renderGDUCards(results) {
+  const filterText = (document.getElementById('gduFilterText')?.value || '').toLowerCase();
+  const sortBy     = document.getElementById('gduSortBy')?.value || 'urgency';
+
+  let filtered = results.filter(r => {
+    if (!filterText) return true;
+    return (r.customerName || '').toLowerCase().includes(filterText) ||
+           (r.fieldNames   || '').toLowerCase().includes(filterText);
+  });
+
+  filtered.sort((a, b) => {
+    if (sortBy === 'customer')  return (a.customerName||'').localeCompare(b.customerName||'');
+    if (sortBy === 'target')    return (a.targetDate||'').localeCompare(b.targetDate||'');
+    if (sortBy === 'scheduled') {
+      const aD = DB.orders.find(o=>o.OrderID===a.orderId)?.ScheduledDate || '';
+      const bD = DB.orders.find(o=>o.OrderID===b.orderId)?.ScheduledDate || '';
+      return aD.localeCompare(bD);
+    }
+    return (b.pctToVT || 0) - (a.pctToVT || 0); // urgency
+  });
+
+  return filtered.map(r => renderGDUCard(r)).join('') || '<div class="empty-state">No results match filter</div>';
+}
+
+function renderGDUFiltered() {
+  const container = document.getElementById('gduCardContainer');
+  if (container) container.innerHTML = renderGDUCards(gduResults);
+}
 }
 
 function renderGDUCard(r) {
@@ -2784,8 +2877,8 @@ function renderGDUTimeline() {
     const order = DB.orders.find(o => o.OrderID === r.orderId);
     const schedDate = order?.ScheduledDate || '';
     const urgency = GDUCalc.urgencyClass(r);
-    const winLeft   = pct(r.vtDate).toFixed(1);
-    const winWidth  = (pct(r.windowEnd) - pct(r.windowStart)).toFixed(1);
+    const winLeft   = pct(r.windowStart || r.vtDate).toFixed(1);
+    const winWidth  = (pct(r.windowEnd) - pct(r.windowStart || r.vtDate)).toFixed(1);
     const targLeft  = pct(r.targetDate).toFixed(1);
     const todayLeft = pct(today).toFixed(1);
     const schedLeft = schedDate ? pct(schedDate).toFixed(1) : null;
@@ -3028,7 +3121,7 @@ function renderReports() {
       </tr>` : '';
 
     const hasChems = prods.length > 0;
-    return `<tr class="report-row-expandable ${hasChems ? 'has-chems' : ''}" ${hasChems ? `onclick="toggleReportChemDetail('${o.OrderID}')"` : ''} title="${hasChems ? 'Click to show chemical details' : ''}">
+    return `<tr class="report-row-expandable ${hasChems ? 'has-chems' : ''}" data-cust-id="${o.CustomerID}" ${hasChems ? `onclick="toggleReportChemDetail('${o.OrderID}')"` : ''} title="${hasChems ? 'Click to show chemical details' : ''}">
       <td>${o.ScheduledDate ? fmtDate(o.ScheduledDate) : fmtDate(o.OrderDate)}</td>
       <td class="report-col-hide-mobile">${o.OrderID}</td>
       <td>${o.CustomerName}</td>
@@ -3111,7 +3204,19 @@ function renderReports() {
   const mapFields = [...fieldIds].map(id => DB.fields.find(f => f.FieldID === id)).filter(Boolean);
   const hasMapData = mapFields.some(f => f.PolygonKML || (f.CentroidLat && f.CentroidLng));
 
+  // Build customer tab strip if multiple customers in results
+  const custIds = [...new Set(filtered.map(o => o.CustomerID))];
+  const custTabsHtml = custIds.length > 1 ? `
+    <div class="report-cust-tabs" id="reportCustTabs">
+      <button class="report-cust-tab active" onclick="filterReportByCust('',this)">All</button>
+      ${custIds.map(id => {
+        const name = DB.customers.find(c=>c.CustomerID===id)?.Name || filtered.find(o=>o.CustomerID===id)?.CustomerName || id;
+        return `<button class="report-cust-tab" onclick="filterReportByCust('${id}',this)">${name}</button>`;
+      }).join('')}
+    </div>` : '';
+
   el.innerHTML = `
+    ${custTabsHtml}
     <div class="report-summary-header">
       <strong>${label}</strong>
       ${pilotFilter ? ' · ' + (DB.pilots.find(p=>p.PilotID===pilotFilter)?.Name||'') : ''}
@@ -3151,6 +3256,22 @@ function renderReports() {
   if (hasMapData) {
     setTimeout(() => renderReportMap(mapFields, filtered), 100);
   }
+}
+
+function filterReportByCust(custId, btn) {
+  // Update tab active state
+  document.querySelectorAll('.report-cust-tab').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  // Show/hide order rows and chem detail rows by customer
+  document.querySelectorAll('tr[data-cust-id]').forEach(row => {
+    const match = !custId || row.dataset.custId === custId;
+    row.style.display = match ? '' : 'none';
+    // Also hide the paired chem detail row if present
+    const next = row.nextElementSibling;
+    if (next && next.classList.contains('report-chem-detail')) {
+      next.style.display = 'none'; // always collapse on filter change
+    }
+  });
 }
 
 function toggleReportChemDetail(orderId) {
@@ -3199,7 +3320,7 @@ function renderReportMap(mapFields, orders) {
     { attribution: 'Imagery © Esri', maxZoom: 19 }
   ).addTo(window._reportMap);
   L.tileLayer(
-    'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+    'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}',
     { maxZoom: 19, opacity: 0.7 }
   ).addTo(window._reportMap);
 
@@ -3393,12 +3514,38 @@ function populateModalDropdowns() {
 
   // Templates
   const tmplSel = document.getElementById('fTemplate');
-  tmplSel.innerHTML = '<option value="">— Select template —</option>' +
-    DB.templates.filter(t => t.Active === 'Yes').map(t => `<option value="${t.TemplateID}">${t.TemplateName} (${t.CropType})</option>`).join('');
+  // Build crop filter chips above template selector if not there
+  if (!document.getElementById('orderTmplCropFilter')) {
+    const filterWrap = document.createElement('div');
+    filterWrap.id = 'orderTmplCropFilter';
+    filterWrap.style.cssText = 'display:flex;gap:0.4rem;flex-wrap:wrap;margin-bottom:0.4rem';
+    const crops = ['All', ...new Set(DB.templates.filter(t=>t.Active==='Yes').map(t=>t.CropType).filter(Boolean))];
+    filterWrap.innerHTML = crops.map(c =>
+      `<button class="btn-ghost order-tmpl-chip ${c==='All'?'active':''}" style="font-size:0.75rem;padding:0.2rem 0.6rem" onclick="filterOrderTemplates('${c}',this)">${c}</button>`
+    ).join('');
+    tmplSel.parentNode.insertBefore(filterWrap, tmplSel);
+  }
+  populateOrderTemplates('All');
 
   // Crop type — from AppParams so it's editable via params.json
   const cropSel = document.getElementById('fCropType');
   if (cropSel) cropSel.innerHTML = AppParams.crops.map(c => `<option>${c}</option>`).join('');
+}
+
+function populateOrderTemplates(cropFilter) {
+  const tmplSel = document.getElementById('fTemplate');
+  if (!tmplSel) return;
+  const prev = tmplSel.value;
+  tmplSel.innerHTML = '<option value="">— Select template —</option>' +
+    DB.templates.filter(t => t.Active === 'Yes' && (cropFilter === 'All' || t.CropType === cropFilter))
+      .map(t => `<option value="${t.TemplateID}">${t.TemplateName} (${t.CropType})</option>`).join('');
+  if (prev) tmplSel.value = prev;
+}
+
+function filterOrderTemplates(crop, btn) {
+  document.querySelectorAll('.order-tmpl-chip').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  populateOrderTemplates(crop);
 }
 
 function addChemicalLine(prefill) {
@@ -3409,10 +3556,14 @@ function addChemicalLine(prefill) {
     `<option value="${p.ProductID}" data-unit="${p.Unit}" data-cost="${p.CostPerUnit}" ${prefill?.ProductID === p.ProductID ? 'selected' : ''}>${p.ProductName}</option>`
   ).join('');
 
+  const unitOptions = ['fl oz','pt','qt','gal','lb','oz (wt)'].map(u =>
+    `<option value="${u}" ${(prefill?.Unit || 'fl oz') === u ? 'selected' : ''}>${u}</option>`
+  ).join('');
+
   div.innerHTML = `
     <div class="form-group" style="margin:0">
       <label class="form-label">Product</label>
-      <select class="form-input chem-product">${prodOptions}</select>
+      <select class="form-input chem-product" onchange="this.closest('.chem-line').querySelector('.chem-unit').value = this.options[this.selectedIndex].dataset.unit || 'fl oz'">${prodOptions}</select>
     </div>
     <div class="form-group" style="margin:0">
       <label class="form-label">Rate/Ac</label>
@@ -3420,7 +3571,7 @@ function addChemicalLine(prefill) {
     </div>
     <div class="form-group" style="margin:0">
       <label class="form-label">Unit</label>
-      <input class="form-input chem-unit" type="text" value="${prefill?.Unit||'fl oz'}" placeholder="fl oz">
+      <select class="form-input chem-unit">${unitOptions}</select>
     </div>
     <div class="form-group" style="margin:0">
       <label class="form-label">By</label>
@@ -3496,15 +3647,19 @@ async function saveOrder() {
     if (!prodSel || !prodSel.value) return;
     const prod = DB.products.find(p => p.ProductID === prodSel.value) || {};
     const rate = parseFloat(rateFld?.value) || 0;
+    const unit = unitFld?.value || prod.Unit || 'fl oz';
     const cost = parseFloat(prod.CostPerUnit || 0);
+    // Convert entered rate to the product's base unit for cost calc
+    // Liquid: entered unit → fl oz; Dry: lb/oz(wt) stored as-is
     const totalUnits = rate * totalAcres;
-    const lineCost   = totalUnits * cost;
+    const costUnits  = toBaseUnits(rate, unit, prod.Unit) * totalAcres;
+    const lineCost   = costUnits * cost;
     chemCost += lineCost;
     lines.push({
       LineID: (editId ? DB.orderProds.find(l => l.OrderID === editId && l.ProductID === prodSel.value)?.LineID : null) || `OPL-${Date.now()}-${i}`,
       OrderID: orderId, ProductID: prodSel.value,
       ProductName: prod.ProductName || prodSel.value,
-      RatePerAcre: rate, Unit: unitFld?.value || prod.Unit || '',
+      RatePerAcre: rate, Unit: unit,
       SuppliedBy: suppFld?.value || 'Me',
       CostPerUnit: cost, Acres: totalAcres,
       TotalUnitsNeeded: totalUnits, TotalProductCost: lineCost
@@ -3660,6 +3815,22 @@ async function writeRow(table, data) {
 }
 
 // ── HELPERS ──────────────────────────────────────────────────────────────────
+// Returns home base {lat,lng,label} — pilot-specific if set, else AppSettings global
+function getHomeBase(pilotId) {
+  if (pilotId) {
+    const pilot = DB.pilots.find(p => p.PilotID === pilotId);
+    if (pilot&&pilot.HomeBaseLat&&pilot.HomeBaseLng) {
+      return { lat: parseFloat(pilot.HomeBaseLat), lng: parseFloat(pilot.HomeBaseLng),
+               label: pilot.HomeBaseLabel || pilot.Name + ' Home' };
+    }
+  }
+  if (AppSettings.homeBaseLat && AppSettings.homeBaseLng) {
+    return { lat: parseFloat(AppSettings.homeBaseLat), lng: parseFloat(AppSettings.homeBaseLng),
+             label: AppSettings.homeBaseLabel || 'Home Base' };
+  }
+  return null;
+}
+
 function nextId(prefix, existing) {
   // Use timestamp suffix to guarantee uniqueness across sessions and devices
   // Fall back to incrementing only if we need a readable ID (e.g. CUST-, PLT-)
@@ -3777,11 +3948,8 @@ function schedFmtDay(dateStr) {
 
 // ── NEAREST-NEIGHBOR AUTO-ROUTE ───────────────────────────────────────────────
 function autoRouteDay(dateStr, pilotId) {
-  const home = AppSettings.homeBaseLat && AppSettings.homeBaseLng
-    ? { lat: parseFloat(AppSettings.homeBaseLat), lng: parseFloat(AppSettings.homeBaseLng) }
-    : null;
-
-  if (!home) { showToast('Set a home base in Settings first', 'error'); return; }
+  const home = getHomeBase(pilotId);
+  if (!home) { showToast('Set a home base in Settings (or pilot record) first', 'error'); return; }
 
   const dayOrders = DB.orders.filter(o =>
     o.ScheduledDate === dateStr &&
@@ -3939,7 +4107,7 @@ function renderSchedule() {
     const vtB = gb?.vtDate || '9999-99-99';
     if (vtA !== vtB) return vtA.localeCompare(vtB);
     if (AppSettings.homeBaseLat && AppSettings.homeBaseLng) {
-      const home = { lat: parseFloat(AppSettings.homeBaseLat), lng: parseFloat(AppSettings.homeBaseLng) };
+      const home = getHomeBase(a.PilotID || b.PilotID);
       const getPos = o => {
         const of = DB.orderFields.find(f => f.OrderID === o.OrderID);
         const f  = of ? DB.fields.find(x => x.FieldID === of.FieldID) : null;
@@ -4068,7 +4236,7 @@ function renderSchedule() {
         <div class="sched-pool-header">
           Unscheduled <span class="sched-pool-count">${poolOrders.length}</span>
           <div class="sched-instructions">${_schedSelected ? '👆 Tap a day in a pilot row' : 'Tap a card to select'}</div>
-          ${!AppSettings.homeBaseLat ? '<div class="sched-warn">⚠ Set home base in Settings for auto-route</div>' : ''}
+          ${!getHomeBase(pilotId) ? '<div class="sched-warn">⚠ Set home base in Settings or pilot record for auto-route</div>' : ''}
         </div>
         <div class="sched-pool-list">${poolHtml}</div>
       </div>
@@ -4161,17 +4329,18 @@ function schedRenderDetail(date) {
     if (!mapEl) return;
     const m = L.map(mapEl, { zoomControl: true });
     L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19 }).addTo(m);
-    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, opacity: 0.7 }).addTo(m);
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, opacity: 0.7 }).addTo(m);
     scheduleState.detailMap = m;
 
     const bounds = [];
 
     // Home base marker
-    if (AppSettings.homeBaseLat && AppSettings.homeBaseLng) {
-      const hll = [parseFloat(AppSettings.homeBaseLat), parseFloat(AppSettings.homeBaseLng)];
+    const _hb = getHomeBase(pilotId);
+    if (_hb) {
+      const hll = [_hb.lat, _hb.lng];
       L.marker(hll, { icon: L.divIcon({ className: '', iconSize: [20,20], iconAnchor: [10,10],
         html: '<div style="width:20px;height:20px;background:#fff;border:3px solid #1a2332;border-radius:50%;box-shadow:0 1px 4px rgba(0,0,0,0.4)"></div>'
-      }) }).bindTooltip(AppSettings.homeBaseLabel || 'Home Base').addTo(m);
+      }) }).bindTooltip(_hb.label).addTo(m);
       bounds.push(hll);
     }
 
@@ -4205,7 +4374,8 @@ function schedRenderDetail(date) {
 
     // Route line between field centroids in order
     const routePts = [];
-    if (AppSettings.homeBaseLat) routePts.push([parseFloat(AppSettings.homeBaseLat), parseFloat(AppSettings.homeBaseLng)]);
+    const _rhb = getHomeBase(pilotId);
+    if (_rhb) routePts.push([_rhb.lat, _rhb.lng]);
     dayOrders.forEach(o => {
       const of = DB.orderFields.find(f => f.OrderID === o.OrderID);
       const f  = of ? DB.fields.find(x => x.FieldID === of.FieldID) : null;
