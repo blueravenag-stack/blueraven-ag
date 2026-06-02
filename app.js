@@ -33,6 +33,7 @@ let AppParams = {
   suppliedByOptions: ['Me', 'Customer'],
   defaultSprayRate: 2,
   defaultTankSize: 100,
+  defaultDailyAcres: 200,
   appName: 'Blue Raven Ag',
   version: '4.3'
 };
@@ -45,8 +46,9 @@ async function loadParams() {
       AppParams = { ...AppParams, ...p };
       // Sync settings defaults from params
       if (!localStorage.getItem('blueraven_settings')) {
-        AppSettings.defaultSprayRate = AppParams.defaultSprayRate;
-        AppSettings.defaultTankSize  = AppParams.defaultTankSize;
+        AppSettings.defaultSprayRate  = AppParams.defaultSprayRate;
+        AppSettings.defaultTankSize   = AppParams.defaultTankSize;
+        AppSettings.defaultDailyAcres = AppParams.defaultDailyAcres;
       }
     }
   } catch(e) { console.warn('params.json not loaded, using defaults', e); }
@@ -2929,8 +2931,8 @@ function renderGDUTimeline() {
     const order = DB.orders.find(o => o.OrderID === r.orderId);
     const schedDate = order?.ScheduledDate || '';
     const urgency = GDUCalc.urgencyClass(r);
-    const winLeft   = pct(r.windowStart || r.vtDate).toFixed(1);
-    const winWidth  = (pct(r.windowEnd) - pct(r.windowStart || r.vtDate)).toFixed(1);
+    const winLeft   = pct(r.vtDate).toFixed(1);
+    const winWidth  = (pct(r.windowEnd) - pct(r.vtDate)).toFixed(1);
     const targLeft  = pct(r.targetDate).toFixed(1);
     const todayLeft = pct(today).toFixed(1);
     const schedLeft = schedDate ? pct(schedDate).toFixed(1) : null;
@@ -4379,7 +4381,7 @@ function schedRenderDetail(date) {
     const bounds = [];
 
     // Home base marker
-    const _hb = getHomeBase(pilotId);
+    const _hb = getHomeBase(activePilot);
     if (_hb) {
       const hll = [_hb.lat, _hb.lng];
       L.marker(hll, { icon: L.divIcon({ className: '', iconSize: [20,20], iconAnchor: [10,10],
