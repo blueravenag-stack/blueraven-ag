@@ -896,6 +896,10 @@ body.light .leaflet-container { background: #e8e8e8; }
 .tl-window { position:absolute; top:2px; height:16px; background:rgba(255,183,77,0.35); border:1px solid var(--warn); border-radius:3px; }
 .tl-target { position:absolute; top:-2px; width:3px; height:24px; background:var(--accent); border-radius:2px; transform:translateX(-50%); }
 .tl-scheduled { position:absolute; top:-2px; width:3px; height:24px; background:var(--accent2); border-radius:2px; transform:translateX(-50%); }
+.tl-scheduled-drag { cursor:grab; width:7px; border-radius:3px; opacity:0.9; }
+.tl-scheduled-drag:hover { opacity:1; width:9px; }
+.tl-sched-unset { position:absolute; top:0; width:16px; height:20px; background:var(--bg3); border:1px dashed var(--text-sub); border-radius:3px; transform:translateX(-50%); cursor:pointer; font-size:10px; color:var(--text-sub); display:flex; align-items:center; justify-content:center; opacity:0.6; }
+.tl-sched-unset:hover { opacity:1; background:var(--accent2); color:#fff; border-color:var(--accent2); }
 .tl-today { position:absolute; top:-4px; width:2px; height:28px; background:var(--danger); opacity:0.8; transform:translateX(-50%); }
 .tl-axis { position:relative; height:20px; margin-left:205px; }
 .tl-tick { position:absolute; font-size:0.62rem; color:var(--text-sub); transform:translateX(-50%); white-space:nowrap; }

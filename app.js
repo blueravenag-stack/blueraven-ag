@@ -2914,7 +2914,7 @@ function renderGDUTimeline() {
 
   // Determine timeline date bounds: earliest windowStart to latest windowEnd
   const allDates = validResults.flatMap(r => [r.vtDate, r.windowEnd, r.targetDate].filter(Boolean));
-  const today = new Date().toISOString().split('T')[0];
+  const today = (d => d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'))(new Date());
   allDates.push(today);
   const minDate = allDates.reduce((a, b) => a < b ? a : b);
   const maxDate = allDates.reduce((a, b) => a > b ? a : b);
@@ -2983,19 +2983,107 @@ function renderGDUTimeline() {
     `<div class="tl-tick" style="left:${m.pct.toFixed(1)}%">${m.label}</div>`
   ).join('');
 
+  // Rebuild window rows to include draggable scheduled marker
+  const windowRowsDraggable = validResults.map(r => {
+    const order = DB.orders.find(o => o.OrderID === r.orderId);
+    const schedDate = order?.ScheduledDate || '';
+    const urgency = GDUCalc.urgencyClass(r);
+    const winLeft   = pct(r.vtDate).toFixed(1);
+    const winWidth  = (pct(r.windowEnd) - pct(r.vtDate)).toFixed(1);
+    const targLeft  = pct(r.targetDate).toFixed(1);
+    const todayLeft = pct(today).toFixed(1);
+    const schedLeft = schedDate ? pct(schedDate).toFixed(1) : null;
+
+    const draggableSchedMarker = schedLeft !== null
+      ? `<div class="tl-scheduled tl-scheduled-drag" 
+            data-order="${r.orderId}"
+            title="Scheduled: ${GDUCalc.fmtDate(schedDate)} · Drag to change"
+            style="left:${schedLeft}%"
+            onmousedown="tlDragStart(event,'${r.orderId}')"></div>`
+      : `<div class="tl-sched-unset" data-order="${r.orderId}"
+            title="Click to set scheduled date"
+            style="left:${targLeft}%"
+            onclick="tlClickSetDate(event,'${r.orderId}','${r.targetDate}')">+</div>`;
+
+    return `<div class="tl-row">
+      <div class="tl-label" title="${r.orderId}">${r.customerName}<br><span style="font-size:0.68rem;color:var(--text-sub)">${r.fieldNames}</span></div>
+      <div class="tl-bar-wrap" data-order="${r.orderId}">
+        <div class="tl-window" style="left:${winLeft}%;width:${winWidth}%" title="Fungicide window: ${GDUCalc.fmtDate(r.vtDate)} – ${GDUCalc.fmtDate(r.windowEnd)}"></div>
+        <div class="tl-target" style="left:${targLeft}%" title="Peak target: ${GDUCalc.fmtDate(r.targetDate)}"></div>
+        ${draggableSchedMarker}
+        <div class="tl-today" style="left:${todayLeft}%"></div>
+      </div>
+    </div>`;
+  }).join('');
+
   container.innerHTML = `
     <div class="tl-wrap">
-      <div class="tl-section-title">Fungicide Windows <span style="font-size:0.72rem;font-weight:400">· <span style="color:var(--warn)">▓</span> window &nbsp; <span style="color:var(--accent)">|</span> target &nbsp; <span style="color:var(--accent2)">◆</span> scheduled &nbsp; <span style="color:var(--danger)">|</span> today</span></div>
-      <div class="tl-chart">
-        <div class="tl-rows">${windowRows}</div>
-        ${Object.keys(acresByDate).length ? `
-        <div class="tl-row tl-acres-row">
-          <div class="tl-label" style="font-size:0.65rem;color:var(--text-sub);padding-top:0.4rem">Sched.<br>Acres</div>
+      ${Object.keys(acresByDate).length ? `
+      <div class="tl-section-title">Scheduled Acres by Date</div>
+      <div class="tl-chart tl-acres-section">
+        <div class="tl-row">
+          <div class="tl-label" style="font-size:0.65rem;color:var(--text-sub)">Acres</div>
           <div class="tl-bar-wrap tl-acres-bars-inline">${acreBars}</div>
-        </div>` : ''}
+        </div>
+        <div class="tl-axis">${ticks}</div>
+      </div>` : ''}
+      <div class="tl-section-title" style="margin-top:1rem">Fungicide Windows <span style="font-size:0.72rem;font-weight:400">· <span style="color:var(--warn)">▓</span> window &nbsp; <span style="color:var(--accent)">|</span> target &nbsp; <span style="color:var(--accent2)">◆</span> scheduled (drag to move) &nbsp; <span style="color:var(--danger)">|</span> today</span></div>
+      <div class="tl-chart" id="tlGanttChart" data-chart-start="${chartStart}" data-total-days="${totalDays}">
+        <div class="tl-rows">${windowRowsDraggable}</div>
         <div class="tl-axis">${ticks}</div>
       </div>
     </div>`;
+}
+
+// ── TIMELINE DRAG-TO-RESCHEDULE ───────────────────────────────────────────────
+let _tlDrag = null; // { orderId, el, barEl, chartStart, totalDays }
+
+function tlDragStart(e, orderId) {
+  e.preventDefault();
+  const el    = e.currentTarget;
+  const barEl = el.closest('.tl-bar-wrap');
+  if (!barEl) return;
+  // Retrieve chart bounds from the renderGDUTimeline closure via dataset on container
+  const chart = document.getElementById('tlGanttChart');
+  if (!chart) return;
+  const chartStartStr = chart.dataset.chartStart;
+  const totalDays     = parseInt(chart.dataset.totalDays);
+  _tlDrag = { orderId, el, barEl, chartStartStr, totalDays };
+  el.style.cursor = 'grabbing';
+  document.addEventListener('mousemove', tlDragMove);
+  document.addEventListener('mouseup',   tlDragEnd);
+}
+
+function tlDragMove(e) {
+  if (!_tlDrag) return;
+  const { el, barEl, chartStartStr, totalDays } = _tlDrag;
+  const rect  = barEl.getBoundingClientRect();
+  const rawPct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+  const daysFromStart = Math.round(rawPct * totalDays);
+  const newDate = GDUCalc.addDays(chartStartStr, daysFromStart);
+  el.style.left = (rawPct * 100).toFixed(1) + '%';
+  el.title = 'Scheduled: ' + GDUCalc.fmtDate(newDate) + ' · Release to set';
+  _tlDrag.pendingDate = newDate;
+}
+
+async function tlDragEnd(e) {
+  if (!_tlDrag) return;
+  document.removeEventListener('mousemove', tlDragMove);
+  document.removeEventListener('mouseup',   tlDragEnd);
+  const { orderId, el, pendingDate } = _tlDrag;
+  el.style.cursor = 'grab';
+  _tlDrag = null;
+  if (!pendingDate) return;
+  // Save and re-render
+  await setGDUScheduledDate(orderId, pendingDate);
+  showToast(`Scheduled → ${GDUCalc.fmtDate(pendingDate)}`, 'success');
+  renderGDUTimeline();
+}
+
+async function tlClickSetDate(e, orderId, targetDate) {
+  await setGDUScheduledDate(orderId, targetDate);
+  showToast(`Scheduled → ${GDUCalc.fmtDate(targetDate)}`, 'success');
+  renderGDUTimeline();
 }
 
 async function runGDUAnalysis() {
@@ -3014,7 +3102,7 @@ async function runGDUAnalysis() {
   // Deduplicate weather by location, batch in groups of 3 to avoid 429s
   const weatherCache = {};
   const fetchCached = async (lat, lng, plantDate, endDate) => {
-    const key = `${lat.toFixed(2)},${lng.toFixed(2)}`;
+    const key = `${lat.toFixed(2)},${lng.toFixed(2)},${plantDate}`;
     if (!weatherCache[key]) {
       weatherCache[key] = GDUCalc.fetchWeatherPublic(lat, lng, plantDate, endDate);
     }

@@ -255,9 +255,12 @@ window.GDUCalc = (() => {
 
     try {
       // Fetch weather from planting through seasonal forecast (6 months out)
-      const temps = fetchFn
+      const rawTemps = fetchFn
         ? await fetchFn(lat, lng, plantDate, fcstEnd)
         : await fetchWeather(lat, lng, plantDate, fcstEnd);
+
+      // Always filter to planting date and beyond — guards against shared cache entries
+      const temps = rawTemps.filter(d => d.date >= plantDate);
 
       // Mark forecast days
       temps.forEach(d => { d.isForecast = d.date > today; });
