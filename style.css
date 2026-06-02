@@ -899,12 +899,12 @@ body.light .leaflet-container { background: #e8e8e8; }
 .tl-today { position:absolute; top:-4px; width:2px; height:28px; background:var(--danger); opacity:0.8; transform:translateX(-50%); }
 .tl-axis { position:relative; height:20px; margin-left:205px; }
 .tl-tick { position:absolute; font-size:0.62rem; color:var(--text-sub); transform:translateX(-50%); white-space:nowrap; }
-.tl-acres-chart { display:flex; flex-direction:column; }
-.tl-acres-bars { height:80px; position:relative; margin-left:205px; background:var(--bg3); border-radius:4px; }
+.tl-acres-row { margin-top:0.75rem; border-top:1px solid var(--border); padding-top:0.5rem; align-items:flex-end; }
+.tl-acres-bars-inline { flex:1; height:70px; position:relative; background:var(--bg3); border-radius:4px; }
 .tl-acre-bar { position:absolute; bottom:0; width:6px; background:var(--accent2); border-radius:2px 2px 0 0; transform:translateX(-50%); transition:height 0.3s; }
 .tl-acre-bar:hover { background:var(--accent); }
-.tl-acre-label { position:absolute; top:-18px; left:50%; transform:translateX(-50%); font-size:0.6rem; color:var(--text-sub); white-space:nowrap; }
-@media (max-width:640px) { .tl-label { width:80px; font-size:0.68rem; } .tl-axis { margin-left:155px; } .tl-acres-bars { margin-left:155px; } }
+.tl-acre-label { position:absolute; top:-16px; left:50%; transform:translateX(-50%); font-size:0.6rem; color:var(--text-sub); white-space:nowrap; }
+@media (max-width:640px) { .tl-label { width:80px; font-size:0.68rem; } .tl-axis { margin-left:155px; } }
 
 /* ── CUSTOMER MINI MAP ── */
 #cMiniMap .leaflet-container { background: var(--bg3); }

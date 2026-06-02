@@ -15,6 +15,14 @@ window.GDUCalc = (() => {
   // Alert window starts at 80% of GDU to VT so pilot can schedule ahead
   const FUNG_ALERT  = 0.80;
 
+  // Local date string (avoids UTC off-by-one in US timezones)
+  function localToday() {
+    const d = new Date();
+    return d.getFullYear() + '-' +
+           String(d.getMonth()+1).padStart(2,'0') + '-' +
+           String(d.getDate()).padStart(2,'0');
+  }
+
   // ── CORE GDU MATH ─────────────────────────────────────────────────────────
 
   function calcDailyGDU(maxF, minF) {
@@ -63,7 +71,7 @@ window.GDUCalc = (() => {
   // Tier 3: ECMWF SEAS5 seasonal  +14 days → VT projection     (6-month ensemble)
 
   async function fetchWeather(lat, lng, startDate, endDate) {
-    const today    = new Date().toISOString().split('T')[0];
+    const today    = localToday();
     const t1End    = addDays(today, -7);   // archive reliable up to 7 days ago
     const t2Start  = addDays(today, -2);   // forecast API covers from 2 days ago
     const t2End    = addDays(today, 14);   // GFS/HRRR goes 14 days ahead
@@ -137,7 +145,7 @@ window.GDUCalc = (() => {
     const data = await res.json();
     if (data.error) throw new Error(data.reason || 'Forecast API error');
     const all   = zipTemps(data);
-    const today2= new Date().toISOString().split('T')[0];
+    const today2 = localToday();
     all.forEach(d => { d.isForecast = d.date > today2; });
     return all.filter(d => d.date >= start && d.date <= end);
   }
@@ -241,7 +249,7 @@ window.GDUCalc = (() => {
     const lat = parseFloat(field?.CentroidLat || 39.17);
     const lng = parseFloat(field?.CentroidLng || -90.14);
 
-    const today     = new Date().toISOString().split('T')[0];
+    const today     = localToday();
     // Extend end date far enough to cover VT for any RM (max ~210 days from early April)
     const fcstEnd   = addDays(today, 180);
 
@@ -262,7 +270,7 @@ window.GDUCalc = (() => {
       const window = fungicideWindow(rm);
 
       // Project target date using month-aware avg GDU (falls back automatically)
-      const lastDate   = withGDU.length ? withGDU[withGDU.length-1].date : new Date().toISOString().split('T')[0];
+      const lastDate   = withGDU.length ? withGDU[withGDU.length-1].date : localToday();
       const avgGDU     = avgGDUForDate(lastDate);
 
       const targetResult   = projectToTarget(withGDU, window.target, avgGDU);

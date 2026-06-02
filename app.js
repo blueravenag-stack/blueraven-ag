@@ -2556,9 +2556,10 @@ function loadPersistedGDU() {
   try {
     const raw = localStorage.getItem('blueraven_gdu');
     if (!raw) return;
-    const { results, ts } = JSON.parse(raw);
+    const { results, ts, ver } = JSON.parse(raw);
     if (!results?.length) return;
-    // Only load if less than 7 days old (GDU windows change slowly)
+    // Invalidate cache if version doesn't match (code changed) or older than 7 days
+    if (ver !== '4.3b') return;
     const age = (Date.now() - new Date(ts).getTime()) / 3600000;
     if (age > 168) return;
     gduResults = results;
@@ -2984,16 +2985,14 @@ function renderGDUTimeline() {
 
   container.innerHTML = `
     <div class="tl-wrap">
-      <div class="tl-section-title">Scheduled Acres by Date</div>
-      ${Object.keys(acresByDate).length ? `
-      <div class="tl-acres-chart">
-        <div class="tl-acres-bars">${acreBars}</div>
-        <div class="tl-axis">${ticks}</div>
-      </div>` : '<div style="color:var(--text-sub);font-size:0.82rem;padding:0.5rem 0">No scheduled dates set — use Field Cards to assign dates.</div>'}
-
-      <div class="tl-section-title" style="margin-top:1.5rem">Fungicide Windows <span style="font-size:0.72rem;font-weight:400">· <span style="color:var(--warn)">▓</span> window &nbsp; <span style="color:var(--accent)">|</span> target &nbsp; <span style="color:var(--accent2)">◆</span> scheduled &nbsp; <span style="color:var(--danger)">|</span> today</span></div>
+      <div class="tl-section-title">Fungicide Windows <span style="font-size:0.72rem;font-weight:400">· <span style="color:var(--warn)">▓</span> window &nbsp; <span style="color:var(--accent)">|</span> target &nbsp; <span style="color:var(--accent2)">◆</span> scheduled &nbsp; <span style="color:var(--danger)">|</span> today</span></div>
       <div class="tl-chart">
         <div class="tl-rows">${windowRows}</div>
+        ${Object.keys(acresByDate).length ? `
+        <div class="tl-row tl-acres-row">
+          <div class="tl-label" style="font-size:0.65rem;color:var(--text-sub);padding-top:0.4rem">Sched.<br>Acres</div>
+          <div class="tl-bar-wrap tl-acres-bars-inline">${acreBars}</div>
+        </div>` : ''}
         <div class="tl-axis">${ticks}</div>
       </div>
     </div>`;
@@ -3051,7 +3050,8 @@ async function runGDUAnalysis() {
     });
     localStorage.setItem('blueraven_gdu', JSON.stringify({
       results: toStore,
-      ts: new Date().toISOString()
+      ts: new Date().toISOString(),
+      ver: '4.3b'
     }));
   } catch(e) { console.warn('GDU storage failed:', e); }
   renderGDU();
