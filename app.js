@@ -2599,7 +2599,6 @@ function renderGDUFiltered() {
   const container = document.getElementById('gduCardContainer');
   if (container) container.innerHTML = renderGDUCards(gduResults);
 }
-}
 
 function renderGDUCard(r) {
   if (r.error) {
