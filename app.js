@@ -980,8 +980,8 @@ async function saveMix() {
       ProductID:   prodId,
       ProductName: prod?.ProductName || '',
       RatePerAcre: parseFloat(inputs[0].value || 0),
-      Unit:        inputs[1].value,
-      SuppliedBy:  selects[1].value,
+      Unit:        selects[1].value,
+      SuppliedBy:  selects[2].value,
       Notes:       '',
     };
   });
@@ -1758,18 +1758,20 @@ function runOrderCalc() {
 function renderMixCalc() {
   const tmplSel = document.getElementById('mixCalcTemplate');
   if (tmplSel) {
-    // Build crop filter if not already there
+    // Build crop filter + text search if not already there
     if (!document.getElementById('mixCalcCropFilter')) {
       const filterWrap = document.createElement('div');
       filterWrap.id = 'mixCalcCropFilter';
-      filterWrap.style.cssText = 'display:flex;gap:0.4rem;flex-wrap:wrap;margin-bottom:0.5rem';
-      const crops = ['All', ...new Set(DB.templates.filter(t=>t.Active==='Yes').map(t=>t.CropType).filter(Boolean))];
-      filterWrap.innerHTML = crops.map(c =>
-        `<button class="btn-ghost mix-crop-chip ${c==='All'?'active':''}" style="font-size:0.75rem;padding:0.2rem 0.6rem" onclick="filterMixCalcTemplates('${c}',this)">${c}</button>`
-      ).join('');
+      filterWrap.innerHTML = `
+        <div style="display:flex;gap:0.4rem;flex-wrap:wrap;margin-bottom:0.4rem" id="mixCalcChips">
+          ${['All', ...new Set(DB.templates.filter(t=>t.Active==='Yes').map(t=>t.CropType).filter(Boolean))].map(c =>
+            `<button class="btn-ghost mix-crop-chip ${c==='All'?'active':''}" style="font-size:0.75rem;padding:0.2rem 0.6rem" onclick="filterMixCalcTemplates('${c}',this)">${c}</button>`
+          ).join('')}
+        </div>
+        <input class="filter-input" type="text" id="mixCalcSearch" placeholder="Search template or product name..." style="width:100%;margin-bottom:0.4rem;font-size:0.82rem" oninput="populateMixCalcTemplates()">`;
       tmplSel.parentNode.insertBefore(filterWrap, tmplSel);
     }
-    populateMixCalcTemplates('All');
+    populateMixCalcTemplates();
   }
   runMixCalc();
 }
@@ -1777,9 +1779,26 @@ function renderMixCalc() {
 function populateMixCalcTemplates(cropFilter) {
   const tmplSel = document.getElementById('mixCalcTemplate');
   if (!tmplSel) return;
+  // Persist crop filter via active chip
+  if (!cropFilter) {
+    const activeChip = document.querySelector('.mix-crop-chip.active');
+    cropFilter = activeChip?.textContent || 'All';
+  }
+  const searchText = (document.getElementById('mixCalcSearch')?.value || '').toLowerCase();
   const prev = tmplSel.value;
   tmplSel.innerHTML = '<option value="">— Select template —</option>';
-  DB.templates.filter(t => t.Active === 'Yes' && (cropFilter === 'All' || t.CropType === cropFilter)).forEach(t => {
+  DB.templates.filter(t => {
+    if (t.Active !== 'Yes') return false;
+    if (cropFilter !== 'All' && t.CropType !== cropFilter) return false;
+    if (searchText) {
+      // Match on template name or any product in the template
+      const nameMatch = t.TemplateName.toLowerCase().includes(searchText);
+      const prodMatch = DB.templateProds.filter(p => p.TemplateID === t.TemplateID)
+        .some(p => (p.ProductName||'').toLowerCase().includes(searchText));
+      return nameMatch || prodMatch;
+    }
+    return true;
+  }).forEach(t => {
     const o = document.createElement('option');
     o.value = t.TemplateID;
     o.textContent = t.TemplateName + ' (' + t.CropType + (t.SprayRate ? ' · ' + t.SprayRate + ' gal/ac' : '') + ')';
@@ -2212,6 +2231,43 @@ function printCustomerReport() {
   }));
 
   const today = new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'});
+  const COLORS = ['#4FC3F7','#81C784','#FFB74D','#F48FB1','#CE93D8','#80DEEA','#FFCC02','#a5d6a7'];
+
+  // Group: customer → date → [orders]
+  const custDateMap = {};
+  filtered.forEach(o => {
+    const cid  = o.CustomerID;
+    const date = o.ScheduledDate || o.OrderDate || 'Unknown Date';
+    if (!custDateMap[cid]) custDateMap[cid] = {};
+    if (!custDateMap[cid][date]) custDateMap[cid][date] = [];
+    custDateMap[cid][date].push(o);
+  });
+
+  const blocks = [];
+  Object.keys(custDateMap).forEach(cid => {
+    const custRec = DB.customers.find(c => c.CustomerID === cid);
+    const custName = custRec?.Name || filtered.find(o => o.CustomerID === cid)?.CustomerName || cid;
+    const custAddr = custRec ? [custRec.Address, custRec.City, custRec.State, custRec.Zip].filter(Boolean).join(', ') : '';
+    const custPhone = custRec?.Phone || '';
+    Object.keys(custDateMap[cid]).sort().forEach(date => {
+      const dayOrders = custDateMap[cid][date];
+      let totalAcres = 0;
+      const rows = dayOrders.map((o, idx) => {
+        const oFields = DB.orderFields.filter(f => f.OrderID === o.OrderID);
+        const oProds  = DB.orderProds.filter(p => p.OrderID === o.OrderID);
+        const ac = parseFloat(o.TotalAcres || 0);
+        totalAcres += ac;
+        const fieldDbRows = oFields.map(f => DB.fields.find(x => x.FieldID === f.FieldID)).filter(Boolean);
+        return {
+          num: idx + 1, status: o.Status, crop: o.CropType || '—', acres: ac, notes: o.Notes || '',
+          fieldNames: oFields.map(f => f.FieldName).join(', ') || '—',
+          prods: oProds.map(p => ({ name: p.ProductName, rate: p.RatePerAcre, unit: p.Unit, total: p.TotalUnitsNeeded, by: p.SuppliedBy })),
+          mapFields: fieldDbRows.map(f => ({ name: f.FieldName, kml: f.PolygonKML, lat: f.CentroidLat, lng: f.CentroidLng }))
+        };
+      });
+      blocks.push({ cid, custName, custAddr, custPhone, date, rows, totalAcres });
+    });
+  });
 
   const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -2220,84 +2276,80 @@ ${_PRINT_CSS}
 ${_LEAFLET_HEAD}
 <script>
 ${_PRINT_UTILS_JS}
-var ORDERS  = ${JSON.stringify(ordersData)};
-var FIELDS  = ${JSON.stringify(fieldsData)};
-var CUSTS   = ${JSON.stringify(custsData)};
-var COLORS  = ['#4FC3F7','#81C784','#FFB74D','#F48FB1','#CE93D8','#80DEEA','#FFCC02','#a5d6a7'];
-
+var BLOCKS = ${JSON.stringify(blocks)};
+var COLORS = ${JSON.stringify(COLORS)};
 window.addEventListener('load', function() {
-  // Render one map per order card
-  ORDERS.forEach(function(o, idx) {
-    var container = document.getElementById('omap_' + o.id);
+  BLOCKS.forEach(function(block, bi) {
+    var container = document.getElementById('custmap_' + bi);
     if (!container) return;
-    var flds = o.fields.map(function(f){ return FIELDS.find(function(x){ return x.id === f.fid; }); }).filter(Boolean);
-    if (!flds.length) { container.style.display = 'none'; return; }
-    setTimeout(function() {
-      var m = _makeSatMap(container);
-      var bounds = [];
-      flds.forEach(function(f) {
-        var b = _addFieldToMap(m, f, '#4FC3F7', null);
-        bounds = bounds.concat(b);
-      });
-      if (bounds.length) m.fitBounds(bounds, { padding: [16,16], maxZoom: 16 });
-    }, 200 + idx * 120);
+    var m = _makeSatMap(container);
+    var bounds = [];
+    block.rows.forEach(function(r, ri) {
+      var color = COLORS[ri % COLORS.length];
+      r.mapFields.forEach(function(f) { var b = _addFieldToMap(m, f, color, r.num); bounds = bounds.concat(b); });
+    });
+    if (bounds.length) m.fitBounds(bounds, { padding: [20, 20], maxZoom: 16 });
   });
 });
 <\/script>
 </head><body>
-<div class="print-wrap">
-  <div style="margin-bottom:16px">
-    <button class="no-print-btn" onclick="window.print()">🖨 Print / Save PDF</button>
-    <button class="no-print-btn secondary" onclick="window.close()">Close</button>
-  </div>
-  <div class="print-header">
-    <div class="print-logo">BLUE <span>RAVEN</span> AG</div>
-    <div class="print-meta"><strong>Customer Spray Report</strong>Generated ${today} · ${label}</div>
-  </div>
-  <div id="reportBody"></div>
+<div style="margin:16px">
+  <button class="no-print-btn" onclick="window.print()">🖨 Print / Save PDF</button>
+  <button class="no-print-btn secondary" onclick="window.close()">Close</button>
 </div>
+<div id="reportBody"></div>
 <script>
 (function() {
   var body = document.getElementById('reportBody');
-  CUSTS.forEach(function(c, ci) {
-    var orders = ORDERS.filter(function(o){ return c.orderIds.indexOf(o.id) > -1; });
-    var totalAc = orders.reduce(function(s,o){ return s + parseFloat(o.acres||0); }, 0);
-    var custHtml = '<div style="' + (ci > 0 ? 'page-break-before:always;' : '') + 'margin-bottom:32px">';
-    custHtml += '<div class="section"><div class="section-title">Customer</div>';
-    custHtml += '<div style="font-size:18px;font-weight:700;margin-bottom:2px">' + c.name + '</div>';
-    if (c.addr)  custHtml += '<div style="color:#555;font-size:13px">' + c.addr  + '</div>';
-    if (c.phone) custHtml += '<div style="color:#555;font-size:13px">' + c.phone + '</div>';
-    custHtml += '</div>';
-    custHtml += '<div class="section"><div class="section-title">Orders</div>';
-    orders.forEach(function(o) {
-      var badge = o.status === 'Completed' ? 'completed' : o.status === 'Scheduled' ? 'scheduled' : 'open';
-      custHtml += '<div class="order-card">';
-      custHtml += '<div class="order-card-header">';
-      custHtml += '<div><div class="order-card-title">' + (o.fields.map(function(f){return f.name;}).join(', ') || o.id) + '</div>';
-      custHtml += '<div class="order-card-sub">' + _fmtDate(o.date) + ' · ' + parseFloat(o.acres||0).toFixed(1) + ' ac · ' + (o.crop||'—') + '</div></div>';
-      custHtml += '<span class="order-card-badge badge-' + badge + '">' + o.status + '</span>';
-      custHtml += '</div><div class="order-card-body">';
-      o.fields.forEach(function(f) {
-        custHtml += '<div class="field-row"><span class="field-name">' + f.name + '</span><span class="field-acres">' + parseFloat(f.acres||0).toFixed(1) + ' ac</span><span class="field-acres">' + (o.crop||'') + '</span></div>';
-      });
-      if (o.prods.length) {
-        custHtml += '<table class="prod-table" style="margin-top:10px"><thead><tr><th>Product</th><th>Rate</th><th>Total Needed</th><th>Supplied By</th></tr></thead><tbody>';
-        o.prods.forEach(function(p) {
-          custHtml += '<tr><td>' + p.name + '</td><td>' + p.rate + ' ' + p.unit + '/ac</td>';
-          custHtml += '<td>' + _fmtAmt(parseFloat(p.total||0), p.unit) + '</td>';
-          custHtml += '<td class="' + (p.by === 'Customer' ? 'by-customer' : '') + '">' + (p.by === 'Customer' ? 'Customer' : 'Applicator') + '</td></tr>';
+  var fmtD = function(s) {
+    if (!s || s === 'Unknown Date') return s;
+    try { var d = /^\\d{4}-\\d{2}-\\d{2}$/.test(s) ? new Date(s + 'T12:00:00') : new Date(s);
+      return d.toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' }); } catch(e) { return s; }
+  };
+  var custSeen = {};
+  BLOCKS.forEach(function(block, bi) {
+    var newCust = !custSeen[block.cid]; custSeen[block.cid] = true;
+    var html = '<div class="print-wrap" style="' + (bi > 0 ? 'page-break-before:always;' : '') + '">';
+    html += '<div class="print-header"><div class="print-logo">BLUE <span>RAVEN</span> AG</div>';
+    html += '<div class="print-meta"><strong>Customer Spray Report</strong> · ' + (newCust ? block.custName : block.custName + ' (cont.)') + '</div></div>';
+    if (newCust) {
+      html += '<div class="section"><div class="section-title">Customer</div>';
+      html += '<div style="font-size:18px;font-weight:700;margin-bottom:4px">' + block.custName + '</div>';
+      if (block.custAddr)  html += '<div style="color:#555;font-size:13px">' + block.custAddr  + '</div>';
+      if (block.custPhone) html += '<div style="color:#555;font-size:13px">' + block.custPhone + '</div>';
+      html += '</div>';
+    }
+    html += '<div class="section"><div class="section-title">Schedule Date</div>';
+    html += '<div style="display:flex;gap:24px;flex-wrap:wrap">';
+    html += '<div><div style="color:#888;font-size:12px">Date</div><div style="font-size:15px;font-weight:700">' + fmtD(block.date) + '</div></div>';
+    html += '<div><div style="color:#888;font-size:12px">Orders</div><div style="font-size:15px;font-weight:700">' + block.rows.length + '</div></div>';
+    html += '<div><div style="color:#888;font-size:12px">Total Acres</div><div style="font-size:15px;font-weight:700">' + block.totalAcres.toFixed(1) + '</div></div>';
+    html += '</div></div>';
+    html += '<div class="section"><div class="section-title">Field Map — ' + fmtD(block.date) + '</div>';
+    html += '<div id="custmap_' + bi + '" class="field-map" style="height:300px"></div></div>';
+    html += '<div class="section"><div class="section-title">Fields &amp; Products</div>';
+    block.rows.forEach(function(r, ri) {
+      var color = COLORS[ri % COLORS.length];
+      var badge = r.status === 'Completed' ? 'completed' : r.status === 'Scheduled' ? 'scheduled' : 'open';
+      html += '<div class="order-card"><div class="order-card-header">';
+      html += '<div style="display:flex;align-items:center;gap:8px"><span style="width:18px;height:18px;border-radius:50%;background:' + color + ';display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:10px;font-weight:700;flex-shrink:0">' + r.num + '</span>';
+      html += '<div><div class="order-card-title">' + r.fieldNames + '</div>';
+      html += '<div class="order-card-sub">' + r.acres.toFixed(1) + ' ac · ' + r.crop + '</div></div></div>';
+      html += '<span class="order-card-badge badge-' + badge + '">' + r.status + '</span>';
+      html += '</div><div class="order-card-body">';
+      if (r.prods.length) {
+        html += '<table class="prod-table"><thead><tr><th>Product</th><th>Rate</th><th>Total Needed</th><th>Supplied By</th></tr></thead><tbody>';
+        r.prods.forEach(function(p) {
+          html += '<tr><td>' + p.name + '</td><td>' + p.rate + ' ' + p.unit + '/ac</td><td>' + _fmtAmt(parseFloat(p.total||0), p.unit) + '</td>';
+          html += '<td class="' + (p.by === 'Customer' ? 'by-customer' : '') + '">' + (p.by === 'Customer' ? 'Customer' : 'Applicator') + '</td></tr>';
         });
-        custHtml += '</tbody></table>';
+        html += '</tbody></table>';
       }
-      custHtml += '<div id="omap_' + o.id + '" class="field-map"></div>';
-      if (o.notes) custHtml += '<div style="margin-top:8px;font-size:12px;color:#555">Notes: ' + o.notes + '</div>';
-      custHtml += '</div></div>';
+      if (r.notes) html += '<div style="margin-top:6px;font-size:12px;color:#555">Notes: ' + r.notes + '</div>';
+      html += '</div></div>';
     });
-    custHtml += '</div>';
-    custHtml += '<div class="summary-row"><div class="summary-item"><div class="summary-val">' + orders.length + '</div><div class="summary-lbl">Orders</div></div>';
-    custHtml += '<div class="summary-item"><div class="summary-val">' + totalAc.toFixed(1) + '</div><div class="summary-lbl">Total Acres</div></div></div>';
-    custHtml += '</div>';
-    body.insertAdjacentHTML('beforeend', custHtml);
+    html += '</div></div>';
+    body.insertAdjacentHTML('beforeend', html);
   });
 })();
 <\/script>
@@ -2568,7 +2620,8 @@ function renderGDU() {
         <option value="scheduled">Sort: Scheduled Date</option>
       </select>
     </div>
-    <div id="gduCardContainer">${renderGDUCards(gduResults)}</div>`;
+    <div id="gduCardContainer"></div>`;
+  renderGDUFiltered();
 }
 
 function renderGDUCards(results) {
@@ -4107,13 +4160,15 @@ function renderSchedule() {
     if (vtA !== vtB) return vtA.localeCompare(vtB);
     if (AppSettings.homeBaseLat && AppSettings.homeBaseLng) {
       const home = getHomeBase(a.PilotID || b.PilotID);
-      const getPos = o => {
-        const of = DB.orderFields.find(f => f.OrderID === o.OrderID);
-        const f  = of ? DB.fields.find(x => x.FieldID === of.FieldID) : null;
-        return f?.CentroidLat ? { lat: parseFloat(f.CentroidLat), lng: parseFloat(f.CentroidLng) } : null;
-      };
-      const posA = getPos(a), posB = getPos(b);
-      if (posA && posB) return GeoUtils.haversineKm(home, posA) - GeoUtils.haversineKm(home, posB);
+      if (home) {
+        const getPos = o => {
+          const of = DB.orderFields.find(f => f.OrderID === o.OrderID);
+          const f  = of ? DB.fields.find(x => x.FieldID === of.FieldID) : null;
+          return f?.CentroidLat ? { lat: parseFloat(f.CentroidLat), lng: parseFloat(f.CentroidLng) } : null;
+        };
+        const posA = getPos(a), posB = getPos(b);
+        if (posA && posB) return GeoUtils.haversineKm(home, posA) - GeoUtils.haversineKm(home, posB);
+      }
     }
     return (a.CustomerName || '').localeCompare(b.CustomerName || '');
   });
