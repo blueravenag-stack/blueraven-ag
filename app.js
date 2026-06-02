@@ -2055,53 +2055,53 @@ const _PRINT_CSS = `
 <link href='https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap' rel='stylesheet'>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: 'DM Sans', sans-serif; font-size: 13px; color: #1a2332; background: #fff; line-height: 1.5; }
-  .print-wrap { max-width: 900px; margin: 0 auto; padding: 24px; }
-  .print-header { display: flex; align-items: flex-start; justify-content: space-between; border-bottom: 2px solid #1a2332; padding-bottom: 14px; margin-bottom: 20px; }
-  .print-logo { font-size: 22px; font-weight: 700; color: #1a2332; letter-spacing: 0.04em; }
+  body { font-family: 'DM Sans', sans-serif; font-size: 12px; color: #1a2332; background: #fff; line-height: 1.4; }
+  .print-wrap { max-width: 900px; margin: 0 auto; padding: 18px 24px; }
+  .print-header { display: flex; align-items: flex-start; justify-content: space-between; border-bottom: 2px solid #1a2332; padding-bottom: 10px; margin-bottom: 14px; }
+  .print-logo { font-size: 20px; font-weight: 700; color: #1a2332; letter-spacing: 0.04em; }
   .print-logo span { color: #1a7fc4; }
-  .print-meta { text-align: right; font-size: 12px; color: #555; }
-  .print-meta strong { display: block; font-size: 15px; color: #1a2332; margin-bottom: 2px; }
-  .section { margin-bottom: 28px; }
-  .section-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #888; border-bottom: 1px solid #e0e0e0; padding-bottom: 5px; margin-bottom: 10px; }
-  .order-card { border: 1px solid #dde2ea; border-radius: 8px; margin-bottom: 16px; overflow: hidden; page-break-inside: avoid; }
-  .order-card-header { background: #f4f6f9; padding: 10px 14px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; }
-  .order-card-title { font-weight: 600; font-size: 14px; }
-  .order-card-sub { font-size: 12px; color: #555; }
-  .order-card-badge { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 99px; }
+  .print-meta { text-align: right; font-size: 11px; color: #555; }
+  .print-meta strong { display: block; font-size: 13px; color: #1a2332; margin-bottom: 2px; }
+  .section { margin-bottom: 14px; }
+  .section-title { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #888; border-bottom: 1px solid #e0e0e0; padding-bottom: 4px; margin-bottom: 8px; }
+  .order-card { border: 1px solid #dde2ea; border-radius: 6px; margin-bottom: 10px; overflow: hidden; page-break-inside: avoid; }
+  .order-card-header { background: #f4f6f9; padding: 7px 12px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px; }
+  .order-card-title { font-weight: 600; font-size: 13px; }
+  .order-card-sub { font-size: 11px; color: #555; }
+  .order-card-badge { font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 99px; }
   .badge-scheduled { background: #e3f2fd; color: #1565c0; }
   .badge-completed { background: #e8f5e9; color: #2e7d32; }
   .badge-open      { background: #fff8e1; color: #f57f17; }
-  .order-card-body { padding: 12px 14px; }
-  .field-row { display: flex; align-items: baseline; gap: 12px; padding: 6px 0; border-bottom: 1px solid #f0f0f0; }
+  .order-card-body { padding: 8px 12px; }
+  .field-row { display: flex; align-items: baseline; gap: 10px; padding: 4px 0; border-bottom: 1px solid #f0f0f0; }
   .field-row:last-child { border-bottom: none; }
   .field-name { font-weight: 500; flex: 1; }
-  .field-acres { font-family: 'DM Mono', monospace; font-size: 12px; color: #555; white-space: nowrap; }
-  .prod-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; }
-  .prod-table th { text-align: left; padding: 4px 8px; background: #f9fafb; font-weight: 500; color: #555; border-bottom: 1px solid #e8e8e8; }
-  .prod-table td { padding: 5px 8px; border-bottom: 1px solid #f4f4f4; }
+  .field-acres { font-family: 'DM Mono', monospace; font-size: 11px; color: #555; white-space: nowrap; }
+  .prod-table { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 11px; }
+  .prod-table th { text-align: left; padding: 3px 6px; background: #f9fafb; font-weight: 500; color: #555; border-bottom: 1px solid #e8e8e8; }
+  .prod-table td { padding: 3px 6px; border-bottom: 1px solid #f4f4f4; }
   .prod-table tr:last-child td { border-bottom: none; }
   .by-customer { color: #2e7d32; font-weight: 500; }
-  .field-map { width: 100%; height: 200px; border-radius: 6px; border: 1px solid #dde2ea; margin-top: 10px; }
-  .summary-row { display: flex; gap: 24px; flex-wrap: wrap; padding: 10px 0; border-top: 1px solid #e0e0e0; margin-top: 4px; }
-  .summary-item .summary-val { font-size: 18px; font-weight: 700; color: #1a2332; }
-  .summary-item .summary-lbl { font-size: 11px; color: #888; }
-  .day-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
-  .day-table th { text-align: left; padding: 6px 10px; background: #1a2332; color: #fff; font-weight: 500; font-size: 11px; letter-spacing: 0.04em; }
-  .day-table td { padding: 8px 10px; border-bottom: 1px solid #eee; vertical-align: top; }
+  .field-map { width: 100%; height: 420px; border-radius: 6px; border: 1px solid #dde2ea; }
+  .summary-row { display: flex; gap: 24px; flex-wrap: wrap; padding: 8px 0; border-top: 1px solid #e0e0e0; margin-top: 4px; }
+  .summary-item .summary-val { font-size: 16px; font-weight: 700; color: #1a2332; }
+  .summary-item .summary-lbl { font-size: 10px; color: #888; }
+  .day-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .day-table th { text-align: left; padding: 5px 8px; background: #1a2332; color: #fff; font-weight: 500; font-size: 10px; letter-spacing: 0.04em; }
+  .day-table td { padding: 6px 8px; border-bottom: 1px solid #eee; vertical-align: top; }
   .day-table tr:nth-child(even) td { background: #f9fafb; }
   .num { font-family: 'DM Mono', monospace; }
-  .row-num { display: inline-block; width: 22px; height: 22px; border-radius: 50%; text-align: center; line-height: 22px; font-size: 11px; font-weight: 700; margin-right: 4px; }
-  .map-full { width: 100%; height: 420px; border-radius: 8px; border: 1px solid #dde2ea; margin-top: 12px; }
-  .no-print-btn { display: inline-block; margin: 0 8px 20px 0; padding: 8px 16px; background: #1a7fc4; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500; font-family: inherit; }
+  .row-num { display: inline-block; width: 20px; height: 20px; border-radius: 50%; text-align: center; line-height: 20px; font-size: 10px; font-weight: 700; margin-right: 4px; }
+  .map-full { width: 100%; height: 420px; border-radius: 8px; border: 1px solid #dde2ea; margin-top: 10px; }
+  .no-print-btn { display: inline-block; margin: 0 8px 16px 0; padding: 7px 14px; background: #1a7fc4; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500; font-family: inherit; }
   .no-print-btn.secondary { background: #fff; color: #1a2332; border: 1px solid #ccc; }
   @media print {
     .no-print-btn { display: none !important; }
-    body { font-size: 12px; }
-    .print-wrap { padding: 8px; max-width: 100%; }
+    body { font-size: 11px; }
+    .print-wrap { padding: 6px; max-width: 100%; }
     .order-card { page-break-inside: avoid; }
-    .map-full { height: 360px; }
-    .field-map { height: 180px; }
+    .map-full { height: 380px; }
+    .field-map { height: 380px; }
   }
 </style>`;
 
@@ -2326,7 +2326,7 @@ window.addEventListener('load', function() {
     html += '<div><div style="color:#888;font-size:12px">Total Acres</div><div style="font-size:15px;font-weight:700">' + block.totalAcres.toFixed(1) + '</div></div>';
     html += '</div></div>';
     html += '<div class="section"><div class="section-title">Field Map — ' + fmtD(block.date) + '</div>';
-    html += '<div id="custmap_' + bi + '" class="field-map" style="height:300px"></div></div>';
+    html += '<div id="custmap_' + bi + '" class="field-map"></div></div>';
     html += '<div class="section"><div class="section-title">Fields &amp; Products</div>';
     block.rows.forEach(function(r, ri) {
       var color = COLORS[ri % COLORS.length];
@@ -3260,10 +3260,10 @@ function renderReports() {
   const custIds = [...new Set(filtered.map(o => o.CustomerID))];
   const custTabsHtml = custIds.length > 1 ? `
     <div class="report-cust-tabs" id="reportCustTabs">
-      <button class="report-cust-tab active" onclick="filterReportByCust('',this)">All</button>
+      <button class="report-cust-tab ${!customerFilter ? 'active' : ''}" onclick="filterReportByCust('',this)">All</button>
       ${custIds.map(id => {
         const name = DB.customers.find(c=>c.CustomerID===id)?.Name || filtered.find(o=>o.CustomerID===id)?.CustomerName || id;
-        return `<button class="report-cust-tab" onclick="filterReportByCust('${id}',this)">${name}</button>`;
+        return `<button class="report-cust-tab ${customerFilter===id ? 'active' : ''}" onclick="filterReportByCust('${id}',this)">${name}</button>`;
       }).join('')}
     </div>` : '';
 
@@ -3311,19 +3311,10 @@ function renderReports() {
 }
 
 function filterReportByCust(custId, btn) {
-  // Update tab active state
-  document.querySelectorAll('.report-cust-tab').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  // Show/hide order rows and chem detail rows by customer
-  document.querySelectorAll('tr[data-cust-id]').forEach(row => {
-    const match = !custId || row.dataset.custId === custId;
-    row.style.display = match ? '' : 'none';
-    // Also hide the paired chem detail row if present
-    const next = row.nextElementSibling;
-    if (next && next.classList.contains('report-chem-detail')) {
-      next.style.display = 'none'; // always collapse on filter change
-    }
-  });
+  // Set the customer dropdown to match the chip, then fully re-render
+  const custSel = document.getElementById('reportCustomer');
+  if (custSel) custSel.value = custId;
+  renderReports();
 }
 
 function toggleReportChemDetail(orderId) {
@@ -4290,7 +4281,6 @@ function renderSchedule() {
         <div class="sched-pool-header">
           Unscheduled <span class="sched-pool-count">${poolOrders.length}</span>
           <div class="sched-instructions">${_schedSelected ? '👆 Tap a day in a pilot row' : 'Tap a card to select'}</div>
-          ${!getHomeBase(pilotId) ? '<div class="sched-warn">⚠ Set home base in Settings or pilot record for auto-route</div>' : ''}
         </div>
         <div class="sched-pool-list">${poolHtml}</div>
       </div>
