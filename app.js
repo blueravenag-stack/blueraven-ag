@@ -2410,7 +2410,13 @@ function printPilotSheet() {
   // Build rowsData per pilot-day block
   // Each block: { pilotId, pilotName, pilotPhone, pilotCert, date, rows[], totalAcres }
   const blocks = [];
-  Object.keys(pilotDayMap).forEach(pid => {
+  // Sort pilots alphabetically by name, then dates chronologically within each pilot
+  const sortedPilotIds = Object.keys(pilotDayMap).sort((a, b) => {
+    const nameA = DB.pilots.find(p => p.PilotID === a)?.Name || filtered.find(o=>o.PilotID===a)?.PilotName || 'Unassigned';
+    const nameB = DB.pilots.find(p => p.PilotID === b)?.Name || filtered.find(o=>o.PilotID===b)?.PilotName || 'Unassigned';
+    return nameA.localeCompare(nameB);
+  });
+  sortedPilotIds.forEach(pid => {
     const pilotRec  = DB.pilots.find(p => p.PilotID === pid);
     const pilotName = pilotRec?.Name  || filtered.find(o=>o.PilotID===pid)?.PilotName || 'Unassigned';
     const pilotPhone= pilotRec?.Phone || '';
@@ -3921,7 +3927,22 @@ async function deleteOrder() {
 }
 
 // ── WRITE TO SHEET ───────────────────────────────────────────────────────────
+// ── WRITE QUEUE ──────────────────────────────────────────────────────────────
+// GAS can only process one request at a time (execution lock). Parallel writes
+// from a single saveOrder() call — or rapid successive saves — cause dropped
+// rows when requests pile up. This queue serializes every write so GAS never
+// sees concurrent requests.
+let _writeQueue = Promise.resolve();
+function _queueWrite(fn) {
+  _writeQueue = _writeQueue.then(fn).catch(e => console.warn('Write queue error:', e));
+  return _writeQueue;
+}
+
 async function writeRow(table, data) {
+  return _queueWrite(() => _writeRowImmediate(table, data));
+}
+
+async function _writeRowImmediate(table, data) {
   // Fields always contain KML polygons — always use POST to avoid URL length issues.
   // All other tables use GET (small payloads, more reliable response handling).
   const usePost = (table === 'fields');
