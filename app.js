@@ -235,7 +235,7 @@ function parseSheet(rows, expectedHeaders) {
 }
 
 // Header definitions match sheet columns exactly
-function orderHeaders()       { return ['OrderID','OrderDate','CustomerID','CustomerName','CropType','PlantingDate','RelativeMaturity','ScheduledDate','CompletedDate','PilotID','PilotName','Status','PricingType','RatePerAcre','TotalAcres','EstimatedTotal','ChemicalCost','TemplateUsed','Invoiced','DJI_FlightFile','Attachments','Notes']; }
+function orderHeaders()       { return ['OrderID','OrderDate','CustomerID','CustomerName','CropType','PlantingDate','RelativeMaturity','ScheduledDate','CompletedDate','PilotID','PilotName','Status','PricingType','RatePerAcre','TotalAcres','BillableAcres','EstimatedTotal','ChemicalCost','TemplateUsed','Invoiced','DJI_FlightFile','Attachments','Notes']; }
 function customerHeaders()    { return ['CustomerID','Name','Phone','Email','Address','City','State','Zip','Notes']; }
 function pilotHeaders()       { return ['PilotID','Name','Phone','Email','FAA_Part107_Num','Active','HomeBaseLat','HomeBaseLng','HomeBaseLabel']; }
 function productHeaders()     { return ['ProductID','ProductName','Manufacturer','Unit','CostPerUnit','REI_Hours','PHI_Days','Notes']; }
@@ -480,7 +480,14 @@ function viewOrder(orderId) {
 
   const btnComplete  = document.getElementById('btnMarkComplete');
   const btnInvoiced  = document.getElementById('btnMarkInvoiced');
-  if (btnComplete) btnComplete.style.display  = o.Status !== 'Completed' ? 'inline-flex' : 'none';
+  // Always reset the shared button back to its default label/enabled state —
+  // this button is reused across every order, so a leftover 'Saving…' from a
+  // previous order must never persist into the next one.
+  if (btnComplete) {
+    btnComplete.disabled = false;
+    btnComplete.textContent = 'Mark Complete';
+    btnComplete.style.display = o.Status !== 'Completed' ? 'inline-flex' : 'none';
+  }
   if (btnInvoiced) btnInvoiced.style.display  = o.Invoiced !== 'Yes'     ? 'inline-flex' : 'none';
 
   document.getElementById('orderDetailContent').innerHTML = `
@@ -504,11 +511,13 @@ function viewOrder(orderId) {
           <div class="detail-row"><span>${f.FieldName}</span><span>${f.Acres ? parseFloat(f.Acres).toFixed(1)+' ac' : '—'}</span></div>
         `).join('') : '<div style="color:var(--text-sub);font-size:0.85rem">No fields linked</div>'}
         ${o.TotalAcres ? `<div class="detail-row" style="border-top:1px solid var(--border);margin-top:0.5rem;padding-top:0.5rem"><span><strong>Total</strong></span><strong>${parseFloat(o.TotalAcres).toFixed(1)} ac</strong></div>` : ''}
+        ${(o.BillableAcres !== undefined && o.BillableAcres !== '' && parseFloat(o.BillableAcres).toFixed(1) !== parseFloat(o.TotalAcres||0).toFixed(1)) ? `<div class="detail-row"><span>Billable</span><span>${parseFloat(o.BillableAcres).toFixed(1)} ac</span></div>` : ''}
       </div>
       <div class="detail-card">
         <div class="detail-section-title">Pricing</div>
         <div class="detail-row"><span>Type</span><span>${o.PricingType || '—'}</span></div>
         <div class="detail-row"><span>Rate/Acre</span><span>${o.RatePerAcre ? '$'+parseFloat(o.RatePerAcre).toFixed(2) : '—'}</span></div>
+        <div class="detail-row"><span>Billable Acres</span><span>${o.BillableAcres !== undefined && o.BillableAcres !== '' ? parseFloat(o.BillableAcres).toFixed(1)+' ac' : '—'}</span></div>
         <div class="detail-row"><span>Chem Cost</span><span>${chemCost}</span></div>
         <div class="detail-row"><span>Est. Total</span><strong>${estTotal}</strong></div>
         <div class="detail-row"><span>Invoiced</span><span>${o.Invoiced || 'No'}</span></div>
@@ -968,6 +977,8 @@ async function saveMix() {
 
   // Gather chemical lines — reuse existing LineIDs when editing to avoid duplicates
   const existingLines = editId ? DB.templateProds.filter(p => p.TemplateID === editId) : [];
+  // Track IDs as we assign them so multiple new lines in the same save don't collide
+  const reservedLineIds = DB.templateProds.map(p => p.LineID);
   const lines = [...document.getElementById('mixChemLines').querySelectorAll('.chem-line')].map((line, i) => {
     const selects = line.querySelectorAll('select');
     const inputs  = line.querySelectorAll('input');
@@ -975,7 +986,13 @@ async function saveMix() {
     const prod    = DB.products.find(p => p.ProductID === prodId);
     // Reuse LineID if this product already existed in the template
     const existing = existingLines.find(e => e.ProductID === prodId);
-    const lineId   = existing ? existing.LineID : nextId('MTP', DB.templateProds.map(p => p.LineID));
+    let lineId;
+    if (existing) {
+      lineId = existing.LineID;
+    } else {
+      lineId = nextId('MTP', reservedLineIds);
+      reservedLineIds.push(lineId); // reserve so the next new line in this batch gets a distinct ID
+    }
     return {
       LineID:      lineId,
       TemplateID:  templateId,
@@ -988,6 +1005,21 @@ async function saveMix() {
     };
   });
 
+  const saveBtn = document.getElementById('btnSaveMix');
+  const origBtnText = saveBtn ? saveBtn.textContent : '';
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
+
+  // ── Write to the sheet FIRST — only reflect success in the UI once confirmed ──
+  try {
+    await writeRow('templates', template);
+    for (const line of lines) await writeRow('templateProds', line);
+  } catch (e) {
+    console.warn('Template save failed:', e.message);
+    showToast('Save failed — check connection and try again', 'error');
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = origBtnText || 'Save Template'; }
+    return;
+  }
+
   if (editId) {
     const idx = DB.templates.findIndex(t => t.TemplateID === editId);
     if (idx > -1) DB.templates[idx] = template;
@@ -999,10 +1031,9 @@ async function saveMix() {
 
   DB.templateProds.push(...lines);
   saveToLocalStorage();
+  if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = origBtnText || 'Save Template'; }
   closeModal();
   showToast(editId ? 'Template updated' : 'Template added', 'success');
-  await writeRow('templates', template);
-  for (const line of lines) await writeRow('templateProds', line);
   renderProducts();
 }
 
@@ -1029,6 +1060,7 @@ function switchTab(tab, el) {
 
 // ── FIELDS ───────────────────────────────────────────────────────────────────
 let orderFieldsSelected = []; // fields staged in the order modal
+let billableAcresTouched = false; // true once the user manually edits Billable Acres for this order
 
 function renderFields() {
   const search  = (document.getElementById('fieldSearch')?.value || '').toLowerCase();
@@ -1296,6 +1328,12 @@ function renderOrderFieldsList() {
 
   // Update chem line acres
   document.querySelectorAll('.chem-acres').forEach(el => el.textContent = total.toFixed(1));
+
+  // Keep Billable Acres in sync with field acres until the user overrides it
+  if (!billableAcresTouched) {
+    const bEl = document.getElementById('fBillableAcres');
+    if (bEl) bEl.value = total.toFixed(1);
+  }
 }
 
 
@@ -3572,10 +3610,11 @@ function renderReportMap(mapFields, orders) {
 // ── ORDER MODAL ──────────────────────────────────────────────────────────────
 function showNewOrderModal() {
   orderFieldsSelected = [];
+  billableAcresTouched = false;
   document.getElementById('editOrderId').value = '';
   document.getElementById('modalTitle').textContent = 'New Order';
 
-  ['fNotes','fAttachments','fRatePerAcre','fPlantingDate','fRelativeMaturity','fScheduledDate'].forEach(id => {
+  ['fNotes','fAttachments','fRatePerAcre','fPlantingDate','fRelativeMaturity','fScheduledDate','fBillableAcres'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.value = '';
   });
@@ -3604,6 +3643,8 @@ function editCurrentOrder() {
   document.getElementById('fNotes').value = o.Notes || '';
   document.getElementById('fAttachments').value = o.Attachments || '';
   document.getElementById('fRatePerAcre').value = o.RatePerAcre || '';
+  document.getElementById('fBillableAcres').value = (o.BillableAcres !== undefined && o.BillableAcres !== '') ? o.BillableAcres : (o.TotalAcres || '');
+  billableAcresTouched = true; // already-set order — don't silently overwrite it if fields change
   document.getElementById('fStatus').value = o.Status || 'Open';
   document.getElementById('fPricingType').value = o.PricingType || 'Flat Rate';
   document.getElementById('fCropType').value = o.CropType || 'Corn';
@@ -3782,6 +3823,10 @@ async function saveOrder() {
   }
 
   const totalAcres = orderFieldsSelected.reduce((s, f) => s + parseFloat(f.Acres || 0), 0);
+  // Billable acres drives pricing + chemical quantity — defaults to field acres, but
+  // can be edited when what's billed differs from actual field acreage.
+  const billableAcresRaw = document.getElementById('fBillableAcres').value;
+  const billableAcres = billableAcresRaw !== '' ? parseFloat(billableAcresRaw) || 0 : totalAcres;
   const ratePerAcre = parseFloat(document.getElementById('fRatePerAcre').value) || 0;
   const pricingType = document.getElementById('fPricingType').value;
   const scheduledDate = document.getElementById('fScheduledDate').value;
@@ -3801,8 +3846,8 @@ async function saveOrder() {
     const cost = parseFloat(prod.CostPerUnit || 0);
     // Convert entered rate to the product's base unit for cost calc
     // Liquid: entered unit → fl oz; Dry: lb/oz(wt) stored as-is
-    const totalUnits = rate * totalAcres;
-    const costUnits  = toBaseUnits(rate, unit, prod.Unit) * totalAcres;
+    const totalUnits = rate * billableAcres;
+    const costUnits  = toBaseUnits(rate, unit, prod.Unit) * billableAcres;
     const lineCost   = costUnits * cost;
     chemCost += lineCost;
     lines.push({
@@ -3811,14 +3856,14 @@ async function saveOrder() {
       ProductName: prod.ProductName || prodSel.value,
       RatePerAcre: rate, Unit: unit,
       SuppliedBy: suppFld?.value || 'Me',
-      CostPerUnit: cost, Acres: totalAcres,
+      CostPerUnit: cost, Acres: billableAcres,
       TotalUnitsNeeded: totalUnits, TotalProductCost: lineCost
     });
   });
 
   const estTotal = pricingType === 'Flat Rate + Chemical'
-    ? ratePerAcre * totalAcres + chemCost
-    : ratePerAcre * totalAcres;
+    ? ratePerAcre * billableAcres + chemCost
+    : ratePerAcre * billableAcres;
 
   // Auto-status logic: future scheduled date → Scheduled; cleared date → revert to Open
   let status = document.getElementById('fStatus').value;
@@ -3846,6 +3891,7 @@ async function saveOrder() {
     PricingType: pricingType,
     RatePerAcre: ratePerAcre,
     TotalAcres: totalAcres,
+    BillableAcres: billableAcres,
     EstimatedTotal: estTotal,
     ChemicalCost: chemCost,
     TemplateUsed: document.getElementById('fTemplate').value,
@@ -3934,8 +3980,13 @@ async function deleteOrder() {
 // sees concurrent requests.
 let _writeQueue = Promise.resolve();
 function _queueWrite(fn) {
-  _writeQueue = _writeQueue.then(fn).catch(e => console.warn('Write queue error:', e));
-  return _writeQueue;
+  // Chain this write onto the queue so GAS never sees concurrent requests.
+  const result = _writeQueue.then(fn);
+  // Keep the QUEUE itself moving even if this write fails, so later queued
+  // writes still run — but return the real (possibly rejecting) promise to
+  // the caller so failures are no longer silently swallowed.
+  _writeQueue = result.catch(() => {});
+  return result;
 }
 
 async function writeRow(table, data) {
@@ -3946,37 +3997,36 @@ async function _writeRowImmediate(table, data) {
   // Fields always contain KML polygons — always use POST to avoid URL length issues.
   // All other tables use GET (small payloads, more reliable response handling).
   const usePost = (table === 'fields');
-  try {
-    if (usePost) {
-      await fetch(GAS_URL, {
-        method:  'POST',
-        mode:    'no-cors',
-        headers: { 'Content-Type': 'text/plain' },
-        body:    JSON.stringify({ action: 'write', table, data }),
-      });
-      console.log('Write POST:', table, data[Object.keys(data)[0]]);
-      return;
-    }
-    // GET for all non-field tables
-    const encoded = encodeURIComponent(JSON.stringify(data));
-    const getUrl  = `${GAS_URL}?action=write&table=${table}&data=${encoded}`;
-    if (getUrl.length > 6000) {
-      // Safety fallback: very large non-field payload
-      await fetch(GAS_URL, {
-        method: 'POST', mode: 'no-cors',
-        headers: { 'Content-Type': 'text/plain' },
-        body: JSON.stringify({ action: 'write', table, data }),
-      });
-      console.log('Write POST (fallback):', table, data[Object.keys(data)[0]]);
-      return;
-    }
-    const res    = await fetch(getUrl);
-    const result = await res.json();
-    if (result.error) console.warn('Write error:', result.error);
-    else console.log('Write OK:', result.action, table, data[Object.keys(data)[0]]);
-  } catch(e) {
-    console.warn('Write failed:', e.message);
+  if (usePost) {
+    await fetch(GAS_URL, {
+      method:  'POST',
+      mode:    'no-cors',
+      headers: { 'Content-Type': 'text/plain' },
+      body:    JSON.stringify({ action: 'write', table, data }),
+    });
+    console.log('Write POST:', table, data[Object.keys(data)[0]]);
+    return;
   }
+  // GET for all non-field tables
+  const encoded = encodeURIComponent(JSON.stringify(data));
+  const getUrl  = `${GAS_URL}?action=write&table=${table}&data=${encoded}`;
+  if (getUrl.length > 6000) {
+    // Safety fallback: very large non-field payload
+    await fetch(GAS_URL, {
+      method: 'POST', mode: 'no-cors',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify({ action: 'write', table, data }),
+    });
+    console.log('Write POST (fallback):', table, data[Object.keys(data)[0]]);
+    return;
+  }
+  const res    = await fetch(getUrl);
+  const result = await res.json();
+  if (result.error) {
+    console.warn('Write error:', result.error);
+    throw new Error(result.error);
+  }
+  console.log('Write OK:', result.action, table, data[Object.keys(data)[0]]);
 }
 
 // ── HELPERS ──────────────────────────────────────────────────────────────────

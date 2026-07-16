@@ -546,6 +546,13 @@
         <div class="form-group"><label class="form-label">Pricing Type</label><select class="form-input" id="fPricingType"><option>Flat Rate</option><option>Flat Rate + Chemical</option></select></div>
         <div class="form-group"><label class="form-label">Rate Per Acre ($)</label><input class="form-input" type="number" step="0.01" id="fRatePerAcre" placeholder="0.00"></div>
       </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Billable Acres</label>
+          <input class="form-input" type="number" step="0.1" id="fBillableAcres" placeholder="0.0" oninput="billableAcresTouched = true">
+          <div style="font-size:0.75rem;color:var(--text-sub);margin-top:0.25rem">Auto-fills from field acres — edit if what you bill differs from actual acreage.</div>
+        </div>
+      </div>
     </div>
     <div class="form-section">
       <div class="form-section-title">Admin</div>
@@ -664,7 +671,7 @@
   <div class="modal-footer">
     <button class="btn-danger-ghost" id="btnDeleteMix" onclick="deleteMix()" style="display:none;margin-right:auto">Delete</button>
     <button class="btn-ghost" onclick="closeModal()">Cancel</button>
-    <button class="btn-primary" onclick="saveMix()">Save Template</button>
+    <button class="btn-primary" id="btnSaveMix" onclick="saveMix()">Save Template</button>
   </div>
 </div>
 
